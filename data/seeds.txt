@@ -1,0 +1,10 @@
+# Entry points only found at run time (harness missing.txt). One hex address per line.
+0C0D206A  # from pr=0C0B250E
+0C0D2126  # from pr=0C0B250E
+0C0D2064  # from pr=0C0B2470
+0C0D2108  # from pr=0C0B2470
+0C0DB654  # from pr=0C0D8CAE
+0C0D5360  # from pr=0C0DB68C
+0C0D53AC  # from pr=0C0CFCA0
+0C0D535C  # from pr=0C0DB68C
+0C0C70BC  # from pr=0C0B0A06

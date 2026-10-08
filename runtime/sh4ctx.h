@@ -49,7 +49,17 @@ void sh4_dispatch(Sh4 *c, u32 target);
 /* Unrecompiled or unexpected code paths end up here. */
 void sh4_unimplemented(Sh4 *c, u32 pc, u16 op);
 
+#ifdef TRACE_LOWRAM
+/* debug: report guest accesses to the BIOS work area 0x0C000000-0x0C01FFFF */
+void trace_lowram(u32 a, int write, int size);
+static inline int is_ram(u32 a)
+{
+	if ((a & 0x1FFE0000u) == 0x0C000000u) trace_lowram(a, -1, 0);
+	return (a & 0x1F000000u) == 0x0C000000u;
+}
+#else
 static inline int is_ram(u32 a) { return (a & 0x1F000000u) == 0x0C000000u; }
+#endif
 
 static inline u8 rd8(u32 a) { return is_ram(a) ? ram[a & RAM_MASK] : (u8)hle_read(a, 1); }
 static inline u16 rd16(u32 a)
@@ -80,11 +90,25 @@ static inline u32 sr_get(const Sh4 *c)
 {
 	return c->sr_rest | (c->m << 9) | (c->q << 8) | (c->s << 1) | c->t;
 }
+#define SR_MD (1u << 30)
+#define SR_RB (1u << 29)
+#define SR_BL (1u << 28)
+
 static inline void sr_set(Sh4 *c, u32 v)
 {
+	/* r0-r7 are banked: switching RB (in privileged mode) swaps the visible set */
+	u32 old_bank = (c->sr_rest & SR_MD) && (c->sr_rest & SR_RB);
+	u32 new_bank = (v & SR_MD) && (v & SR_RB);
+	if (old_bank != new_bank)
+		for (int i = 0; i < 8; i++) { u32 t = c->r[i]; c->r[i] = c->r_bank[i]; c->r_bank[i] = t; }
 	c->t = v & 1; c->s = (v >> 1) & 1; c->q = (v >> 8) & 1; c->m = (v >> 9) & 1;
-	c->sr_rest = v & ~0x303u;
+	c->sr_rest = v & 0x700083F0u & ~0x303u;
 }
+
+/* Time and interrupts: generated code calls TICK before every branch, call and return. */
+extern u64 hle_next_event;
+void hle_event(Sh4 *c);
+#define TICK(c, n) do { (c)->cycles += (n); if ((c)->cycles >= hle_next_event) hle_event(c); } while (0)
 
 static inline void fpscr_set(Sh4 *c, u32 v)
 {

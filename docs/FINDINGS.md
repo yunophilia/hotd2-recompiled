@@ -15,7 +15,7 @@ Reference emulator: Flycast `0d9853d` (see `patches/flycast/BASE_COMMIT`).
 
 ## Program image
 
-- The BIOS copies `ic22[0x000000:0x123000]` verbatim to **`0x0C020000–0x0C143000`**.
+- The BIOS copies `ic22[0x000000:0x125E10]` (code + initialised .data) verbatim to **`0x0C020000–0x0C145E10`**, right up to BSS.
   Nothing else in RAM is code (checked by `rts;nop` density and by diffing dumps).
 - crt0 at `0x0C020000`: zero BSS from a table at `0x0C020060`, load SP, jump to main.
 
@@ -92,3 +92,15 @@ ID, feature query, switches, coins, analog/screen position for the guns).
 
 Never commit ROMs, RAM dumps or disassembly listings. They are the game's
 code and data. Commit only tools, notes and our own code.
+
+## BIOS and hardware HLE (runtime/hle.c, jvs.c, cart.c, ta.c)
+
+- The BIOS leaves VBR = `0x8C000000`. Games register interrupt callbacks at
+  `VBR + 0x1C0 + (INTEVT >> 3)`; the level-6 slot is `0x8C000224`. The HLE calls
+  them like ordinary functions on a private stack.
+- PVR chip ID `0x17FD11DB`, revision `0x11`. With ID 0 the SDK traps forever.
+- Implemented so far: Maple/MIE/JVS I/O board, EEPROM, SRAM, VRAM (32/64-bit paths),
+  Holly interrupts + scanline timing, TMU, store queues, ch2 DMA to the TA (recorded,
+  not yet rendered), cart PIO/G1 DMA.
+- Current state: the harness runs past asset loading and into a steady loop
+  (4000+ registers touched, 200k-access budget used up). Not yet compared against Flycast.

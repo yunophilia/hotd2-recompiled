@@ -8,13 +8,14 @@ until rts/jmp/bra-out, following conditional and in-function branches.
     python3 -I tools/funcs.py <hotd2.zip> --dis 0x0c020000  # disassemble one
 """
 import argparse
+import os
 import struct
 import zipfile
 
 from sh4 import decode
 
 LOAD = 0x0C020000
-PROGRAM_SIZE = 0x123000          # ic22 bytes the BIOS copies to RAM
+PROGRAM_SIZE = 0x125E10          # ic22 bytes the BIOS copies to RAM: code + .data, up to BSS
 PROLOGUES = {0x2FE6, 0x4F22, 0x2FD6, 0x2FC6, 0x2FB6, 0x2FA6, 0x2F96, 0x2F86}
 
 
@@ -90,6 +91,48 @@ def switch_targets(img, braf_pc, max_cases=256):
     return out
 
 
+def jump_table_targets(img, jmp_pc, reg, lookback=8, max_entries=128):
+    """Targets of `mov.l lit,rX; mov.l @(r0,rX),reg; ...; jmp @reg` (absolute jump table).
+
+    The table size is not encoded, so read entries while they point at code
+    close to the jump.
+    """
+    for a in range(jmp_pc - 2, jmp_pc - 2 * lookback, -2):
+        if not img.has(a):
+            return []
+        i = decode(img.u16(a), a)
+        if i.text.startswith("mov.l @(r0,") and i.text.endswith("," + reg):
+            base_reg = i.text.split(",")[1].rstrip(")")
+            table = reg_literal(img, a, base_reg)
+            if table is None or not img.has(table, 4):
+                return []
+            out = []
+            for k in range(max_entries):
+                if not img.has(table + 4 * k, 4):
+                    break
+                v = img.u32(table + 4 * k)
+                if v % 2 or not img.has(v) or abs(v - jmp_pc) > 0x2000:
+                    break
+                out.append(v)
+            return out
+        if i.jump or i.cond:
+            return []
+    return []
+
+
+def load_seeds(path=None):
+    """Extra entry points found at run time (data/seeds.txt: one hex address per line)."""
+    path = path or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "seeds.txt")
+    if not os.path.exists(path):
+        return []
+    out = []
+    for line in open(path):
+        line = line.split("#")[0].strip()
+        if line:
+            out.append(int(line, 16))
+    return out
+
+
 def walk(img, entry):
     """Return (blocks, calls, literals) for the function starting at entry."""
     seen, todo, calls, lits = set(), [entry], set(), set()
@@ -105,9 +148,11 @@ def walk(img, entry):
             if i.call and i.target is not None:
                 calls.add(i.target)
             if i.indirect and i.text.startswith(("jsr", "jmp")):  # jmp = tail call
-                t = reg_literal(img, pc, i.text.split("@")[1])
+                reg = i.text.split("@")[1]
+                t = reg_literal(img, pc, reg)
                 if t is not None and img.has(t) and t % 2 == 0:
                     calls.add(t)
+                calls.update(jump_table_targets(img, pc, reg))
             if i.text.startswith("braf"):
                 todo.extend(t for t in switch_targets(img, pc) if img.has(t))
             if i.cond and i.target is not None:
@@ -126,7 +171,7 @@ def walk(img, entry):
 
 
 def discover(img):
-    funcs, todo = {}, [img.lo]
+    funcs, todo = {}, [img.lo] + [s for s in load_seeds() if img.has(s)]
     # literal pointers to prologues anywhere in the image
     for off in range(0, len(img.data) - 3, 4):
         v = struct.unpack_from("<I", img.data, off)[0]

@@ -327,6 +327,7 @@ class Gen:
                 labels.update(t for t in funcs.switch_targets(img, pc) if t in bodyset)
         delay_of = set()
         prev_end = None
+        run = 0  # instructions since the last TICK
         for pc in pcs:
             if pc in delay_of:  # emitted with its branch (inline, labelled if needed)
                 continue
@@ -336,6 +337,7 @@ class Gen:
             if pc in labels:
                 out.append(f"L_{pc:08x}:;")
             prev_end = pc + 2
+            run += 1
             if not i.delay and not i.cond:
                 if i.text.startswith("trapa") or i.text.startswith("sleep") or not i.valid:
                     out.append(f"\tsh4_unimplemented(c, {hx(pc)}, 0x{i.op:04X});")
@@ -344,12 +346,14 @@ class Gen:
                 continue
             if i.cond and not i.delay:  # bt / bf
                 cond = "c->t" if i.text.startswith("bt") else "!c->t"
-                out.append(f"\tif ({cond}) {self.goto(i.target, bodyset)}")
+                out.append(f"\tTICK(c, {run}); if ({cond}) {self.goto(i.target, bodyset)}")
+                run = 0
                 continue
             # delayed branches: capture target/condition, run the slot, then transfer
             slot_pc = pc + 2
             delay_of.add(slot_pc)
-            slot = f"/* slot */ {self.sem(slot_pc)}"
+            slot = f"TICK(c, {run + 1}); /* slot */ {self.sem(slot_pc)}"
+            run = 0
             prev_end = pc + 4
             name = i.text.split()[0]
             rn = (i.op >> 8) & 0xF
@@ -373,8 +377,11 @@ class Gen:
                 out.append(f"\t{{ u32 tgt = c->r[{rn}]; c->pr = {hx(pc + 4)}; {slot} {direct}sh4_dispatch(c, tgt); }}")
             elif name == "bsrf":
                 out.append(f"\t{{ u32 tgt = {hx(pc + 4)} + c->r[{rn}]; c->pr = {hx(pc + 4)}; {slot} sh4_dispatch(c, tgt); }}")
-            elif name in ("rts", "rte"):
+            elif name == "rts":
                 out.append(f"\t{{ {slot} return; }}")
+                prev_end = None
+            elif name == "rte":
+                out.append(f"\t{{ {slot} sr_set(c, c->ssr); return; }}")
                 prev_end = None
             elif name == "jmp":
                 t = funcs.reg_literal(img, pc, f"r{rn}")
