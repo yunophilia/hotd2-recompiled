@@ -27,17 +27,34 @@ void cart_set_image(u8 *image, u32 size);
 extern void (*hle_on_frame)(u64 frame);
 extern void (*hle_on_render)(u64 render, const u8 *list, u32 len);
 
-void sh4_dispatch(Sh4 *c, u32 target)
+void (*sh4_lookup(u32 target))(Sh4 *)
 {
 	u32 lo = 0, hi = func_count, t = target & 0x1FFFFFFF;
 	while (lo < hi) {
 		u32 mid = (lo + hi) / 2;
 		u32 a = func_table[mid].addr & 0x1FFFFFFF;
-		if (a == t) { func_table[mid].fn(c); return; }
+		if (a == t) return func_table[mid].fn;
 		if (a < t) lo = mid + 1; else hi = mid;
 	}
-	fprintf(stderr, "hotd2: no recompiled function at %08X (pr=%08X)\n", target, c->pr);
-	abort();
+	return NULL;
+}
+
+void sh4_interp(Sh4 *c, u32 pc);
+
+void sh4_dispatch(Sh4 *c, u32 target)
+{
+	void (*fn)(Sh4 *) = sh4_lookup(target);
+	if (fn) { fn(c); return; }
+	/* code the static analysis missed: interpret it (report each address once) */
+	static u32 reported[256];
+	static unsigned nreported;
+	int seen = 0;
+	for (unsigned i = 0; i < nreported; i++) if (reported[i] == target) seen = 1;
+	if (!seen && nreported < 256) {
+		reported[nreported++] = target;
+		fprintf(stderr, "hotd2: interpreting %08X (not recompiled; add to data/seeds.txt)\n", target);
+	}
+	sh4_interp(c, target);
 }
 
 void sh4_unimplemented(Sh4 *c, u32 pc, u16 op)

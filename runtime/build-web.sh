@@ -10,7 +10,7 @@ source "$HOME/hotd2/emsdk/emsdk_env.sh" >/dev/null 2>&1
 mkdir -p "$out/gen" "$out/obj"
 python3 -I -c "import sys; sys.path.insert(0, '$here/tools'); sys.argv = ['recomp', '$zip', '$out/gen']; import recomp; recomp.main()"
 srcs=("$out"/gen/*.c "$here"/runtime/web.c "$here"/runtime/hle.c "$here"/runtime/jvs.c "$here"/runtime/cart.c
-      "$here"/runtime/ta.c "$here"/runtime/coro.c "$here"/runtime/pvr.c "$here"/runtime/glframe.c)
+      "$here"/runtime/ta.c "$here"/runtime/coro.c "$here"/runtime/pvr.c "$here"/runtime/glframe.c "$here"/runtime/interp.c)
 cflags="-O2 -pthread -w -I$here/runtime -I$out/gen"
 printf '%s\n' "${srcs[@]}" | xargs -P"$(nproc)" -I{} sh -c 'o='"$out"'/obj/$(basename {} .c).o; [ "$o" -nt {} ] || emcc '"$cflags"' -c {} -o "$o"'
 mkdir -p "$here/web/game"

@@ -92,10 +92,41 @@ static u64 frame_limit;   /* HOTD2_FRAMES: stop after this many frames */
 
 static void stop(const char *why);
 
+/* HOTD2_INPUT="1300:coin,1310:start,1312:-start,1400:aim=320/240,1401:fire,1403:-fire,1500:reload"
+ * scripted JVS input for exploring game code paths natively. */
+#include "jvs.h"
+static void scripted_input(u64 frame)
+{
+	const char *spec = getenv("HOTD2_INPUT");
+	for (const char *p = spec; p && *p; ) {
+		u64 f = strtoull(p, NULL, 10);
+		const char *colon = strchr(p, ':');
+		const char *comma = strchr(p, ',');
+		if (colon && (!comma || colon < comma) && f == frame) {
+			const char *a = colon + 1;
+			int off = *a == '-';
+			if (off) a++;
+			if (!strncmp(a, "coin", 4)) jvs_input.coins[0]++;
+			else if (!strncmp(a, "start", 5)) jvs_input.buttons[0] = off ? jvs_input.buttons[0] & ~JVS_START : jvs_input.buttons[0] | JVS_START;
+			else if (!strncmp(a, "fire", 4)) jvs_input.buttons[0] = off ? jvs_input.buttons[0] & ~JVS_TRIGGER : jvs_input.buttons[0] | JVS_TRIGGER;
+			else if (!strncmp(a, "reload", 6)) jvs_input.offscreen[0] = !off;
+			else if (!strncmp(a, "test", 4)) jvs_input.test = !off;
+			else if (!strncmp(a, "aim=", 4)) {
+				jvs_input.gun_x[0] = (u16)strtoul(a + 4, NULL, 10);
+				const char *sl = strchr(a, '/');
+				if (sl) jvs_input.gun_y[0] = (u16)strtoul(sl + 1, NULL, 10);
+			}
+		}
+		if (!comma) break;
+		p = comma + 1;
+	}
+}
+
 static void dump_on_frame(u64 frame)
 {
 	if (frame_limit && frame >= frame_limit)
 		stop("frame limit reached");
+	scripted_input(frame);
 	static const char *spec;
 	if (!spec && !(spec = getenv("HOTD2_DUMP_FRAMES"))) spec = "";
 	for (const char *p = spec; *p; ) {
@@ -194,20 +225,36 @@ void trace_lowram(u32 a, int write, int size)
 }
 #endif
 
-void sh4_dispatch(Sh4 *c, u32 target)
+void (*sh4_lookup(u32 target))(Sh4 *)
 {
-	u32 lo = 0, hi = func_count;
-	target &= 0x1FFFFFFF;
-	target |= 0x0C000000u & ~0x1FFFFFFFu; /* keep it in P0 for the lookup */
+	u32 lo = 0, hi = func_count, t = target & 0x1FFFFFFF;
 	while (lo < hi) {
 		u32 mid = (lo + hi) / 2;
 		u32 a = func_table[mid].addr & 0x1FFFFFFF;
-		if (a == target) { func_table[mid].fn(c); return; }
-		if (a < target) lo = mid + 1; else hi = mid;
+		if (a == t) return func_table[mid].fn;
+		if (a < t) lo = mid + 1; else hi = mid;
 	}
-	fprintf(stderr, "dispatch: no function at %08X (pr=%08X)\n", target, c->pr);
-	FILE *m = fopen("missing.txt", "a");
-	if (m) { fprintf(m, "%08X  # from pr=%08X\n", target, c->pr); fclose(m); }
+	return NULL;
+}
+
+void sh4_interp(Sh4 *c, u32 pc);
+
+void sh4_dispatch(Sh4 *c, u32 target)
+{
+	void (*fn)(Sh4 *) = sh4_lookup(target);
+	if (fn) { fn(c); return; }
+	/* record it for data/seeds.txt; with HOTD2_INTERP=1 keep going in the interpreter */
+	static u32 logged[1024];
+	static unsigned nlogged;
+	int seen = 0;
+	for (unsigned i = 0; i < nlogged; i++) if (logged[i] == target) seen = 1;
+	if (!seen) {
+		if (nlogged < 1024) logged[nlogged++] = target;
+		fprintf(stderr, "dispatch: no function at %08X (pr=%08X)\n", target, c->pr);
+		FILE *m = fopen("missing.txt", "a");
+		if (m) { fprintf(m, "%08X  # from pr=%08X\n", target, c->pr); fclose(m); }
+	}
+	if (getenv("HOTD2_INTERP")) { sh4_interp(c, target); return; }
 	stop("unknown dispatch target");
 }
 
