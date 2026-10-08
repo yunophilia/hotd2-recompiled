@@ -183,3 +183,21 @@ stop, and dumps RAM at chosen frames (`HOTD2_DUMP_FRAMES`).
   point without pausing (around its frame 1210).
 - Ruled out so far: JVS replies (byte-identical), sound command ring, TA list
   end interrupts, TA_LIST_INIT/TA_ITP_CURRENT, cart DMA addressing.
+
+### Stall fixed: SB_SBREV, and first rendered frames (2026-10-08)
+
+- The attract stall was the SDK's error trap in `f_0c0c0450` (`bra` to self at
+  `0x0C0C050A`) after a VRAM texture allocation failed. Root cause: Holly's
+  system-bus revision register `SB_SBREV` (`0x005F689C`) read 0, so the SDK
+  (`f_0c0dbdc2`) chose feature flags 0 instead of `0xF` at `0x0CA25C58`, put both
+  framebuffers in VRAM heap 0 and ran out of texture space later. Real value: `0x0B`.
+- `runtime/pvr.c`: display-list decoder (all 15 vertex types, sprites, polygon
+  header types 0–4, strips) + texture decoder (1555/565/4444, YUV422, 4/8-bit
+  palette, twiddled, rectangular, stride, VQ, mipmap offsets) + reference software
+  rasteriser (z = 1/w, perspective UVs, shading instructions, offset colour,
+  blend modes, punch-through alpha test). Frames are matched to STARTRENDER by
+  PARAM_BASE (`ta_frame_for`).
+- `HOTD2_SHOTS=<render numbers>` writes `shot_<n>.ppm`; `tools/ppm2png.py` converts.
+- Boot warning screen and the 3D attract scene render correctly. Known gaps: no
+  background plane yet (black band), some translucent smoke renders blocky, and
+  the warning shows the Japan region text (region likely read from BIOS/EEPROM).

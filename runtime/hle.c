@@ -140,6 +140,10 @@ static u32 scanline;
 u64 hle_frames;
 u64 hle_renders;
 void (*hle_on_frame)(u64 frame);   /* debug hook, called at every vblank-in */
+/* called at STARTRENDER with the display list being drawn */
+void (*hle_on_render)(u64 render, const u8 *list, u32 len);
+
+u32 pvr_reg(u32 phys) { return pvr[(phys - 0x005F8000u) / 4 & 0x7FF]; }
 
 #define SB(a) sb[((a) - 0x005F6800u) / 4]
 #define PVR(a) pvr[((a) - 0x005F8000u) / 4]
@@ -286,6 +290,8 @@ u32 hle_read(u32 addr, int size)
 		v = istext;
 	} else if (p == SB_ISTERR) {
 		v = isterr;
+	} else if (p == 0x005F689Cu) {
+		v = 0x0B;          /* SB_SBREV: Holly system-bus revision; selects the SDK's feature set */
 	} else if (p == 0x005F8000u) {
 		v = 0x17FD11DBu;   /* PVR2 (CLX2) chip ID */
 	} else if (p == 0x005F8004u) {
@@ -394,14 +400,19 @@ void hle_write(u32 addr, u32 value, int size)
 	if (p == 0x005F6808u && (value & 1))
 		ch2_dma();
 	if (p == 0x005F8144u && (value & 0x80000000u)) { /* TA_LIST_INIT */
-		ta_list_reset();
+		ta_frame_begin(PVR(0x005F8128u));             /* new list at TA_ISP_BASE */
 		PVR(0x005F8138u) = PVR(0x005F8128u);         /* TA_ITP_CURRENT = TA_ISP_BASE */
 		PVR(0x005F8134u) = PVR(0x005F8124u);         /* TA_NEXT_OPB = TA_OL_BASE */
 		PVR(0x005F8144u) = 0;                        /* init completes at once */
 	}
-	if (p == 0x005F8014u) {                         /* STARTRENDER: not drawn yet, report done */
+	if (p == 0x005F8014u) {                         /* STARTRENDER */
 		extern u64 hle_renders;
 		hle_renders++;
+		if (hle_on_render) {
+			u32 len;
+			const u8 *list = ta_frame_for(PVR(0x005F8020u), &len);   /* PARAM_BASE */
+			hle_on_render(hle_renders, list, len);
+		}
 		hle_raise_normal(0); hle_raise_normal(1); hle_raise_normal(2);
 	}
 	if (p == 0x005F7418u && (value & 1) && (SB(0x005F7414u) & 1))

@@ -59,6 +59,34 @@ static void print_counts(void)
 
 extern u32 hle_read(u32 addr, int size);
 
+/* HOTD2_SHOTS=100,500 renders those STARTRENDER calls to shot_<n>.ppm */
+static int listed(const char *spec, unsigned long long n)
+{
+	for (const char *p = spec; p && *p; ) {
+		if (strtoull(p, NULL, 10) == n) return 1;
+		const char *comma = strchr(p, ',');
+		if (!comma) break;
+		p = comma + 1;
+	}
+	return 0;
+}
+
+static void shot_on_render(u64 render, const u8 *list, u32 len)
+{
+	extern void pvr_render_soft(const u8 *list, u32 len, u8 *rgba);
+	static u8 rgba[640 * 480 * 4];
+	if (!listed(getenv("HOTD2_SHOTS"), render)) return;
+	pvr_render_soft(list, len, rgba);
+	char name[64];
+	snprintf(name, sizeof name, "shot_%llu.ppm", (unsigned long long)render);
+	FILE *f = fopen(name, "wb");
+	if (!f) return;
+	fprintf(f, "P6\n640 480\n255\n");
+	for (int i = 0; i < 640 * 480; i++) fwrite(&rgba[4 * i], 1, 3, f);
+	fclose(f);
+	fprintf(stderr, "shot: render %llu, %u list bytes -> %s\n", (unsigned long long)render, len, name);
+}
+
 /* HOTD2_DUMP_FRAMES=700,900 writes ram_<frame>.bin, same as the patched Flycast */
 static void dump_on_frame(u64 frame)
 {
@@ -217,6 +245,8 @@ int main(int argc, char **argv)
 	hle_init(&cpu);
 	extern void (*hle_on_frame)(u64 frame);
 	hle_on_frame = dump_on_frame;
+	extern void (*hle_on_render)(u64 render, const u8 *list, u32 len);
+	hle_on_render = shot_on_render;
 	hle_trace = hw_trace;
 	signal(SIGTERM, dump_ring);
 	signal(SIGINT, dump_ring);

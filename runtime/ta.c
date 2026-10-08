@@ -30,11 +30,48 @@ void hle_raise_normal(int bit);
 
 static const int list_end_irq[5] = { 7, 8, 9, 10, 21 }; /* opaque, op. mod, trans, tr. mod, punch-through */
 
+/* Finished frames, keyed by the parameter base they were built at, so that
+ * STARTRENDER (which names a PARAM_BASE) draws the right one. */
+#define FRAME_SLOTS 4
+static struct { u32 base; u8 *data; u32 len, cap; } frames[FRAME_SLOTS];
+static unsigned frame_next;
+static u32 cur_base;
+
 void ta_list_reset(void)
 {
 	ta_list_len = 0;
 	list_type = -1;
 	skip_next = 0;
+}
+
+/* TA_LIST_INIT: file the list built so far under its base, start a new one at `base`. */
+void ta_frame_begin(u32 base)
+{
+	if (ta_list_len) {
+		int k = -1;
+		for (int i = 0; i < FRAME_SLOTS; i++)
+			if (frames[i].data && frames[i].base == cur_base) k = i;
+		if (k < 0) k = (int)(frame_next++ % FRAME_SLOTS);
+		if (frames[k].cap < ta_list_len) {
+			frames[k].cap = ta_list_len * 2;
+			frames[k].data = realloc(frames[k].data, frames[k].cap);
+		}
+		memcpy(frames[k].data, ta_list, ta_list_len);
+		frames[k].len = ta_list_len;
+		frames[k].base = cur_base;
+	}
+	cur_base = base;
+	ta_list_reset();
+}
+
+/* The list to draw for PARAM_BASE `base` (falls back to the list in progress). */
+const u8 *ta_frame_for(u32 base, u32 *len)
+{
+	if (base == cur_base && ta_list_len) { *len = ta_list_len; return ta_list; }
+	for (int i = 0; i < FRAME_SLOTS; i++)
+		if (frames[i].data && frames[i].base == base) { *len = frames[i].len; return frames[i].data; }
+	*len = ta_list_len;
+	return ta_list;
 }
 
 static u32 recent_pcw[16];
