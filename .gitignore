@@ -1,0 +1,8 @@
+# Never commit game data: ROMs, RAM/VRAM dumps, extracted assets.
+*.zip
+*.bin
+dumps/
+extracted/
+build/
+out/
+__pycache__/

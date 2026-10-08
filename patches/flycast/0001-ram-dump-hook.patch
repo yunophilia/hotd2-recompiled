@@ -1,0 +1,63 @@
+From 5d9ca2eb0eef9dc98f03599a8365f3399f2f3cda Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ivan=20H=2E=20=F0=9F=8F=B3=EF=B8=8F=E2=80=8D=F0=9F=8C=88?=
+ =?UTF-8?q?=F0=9F=8F=B3=EF=B8=8F=E2=80=8D=E2=9A=A7=EF=B8=8F?=
+ <ivankun16.5@gmail.com>
+Date: Wed, 7 Oct 2026 21:05:57 -0700
+Subject: [PATCH] RAM dump hook
+
+---
+ core/emulator.cpp | 29 +++++++++++++++++++++++++++++
+ 1 file changed, 29 insertions(+)
+
+diff --git a/core/emulator.cpp b/core/emulator.cpp
+index 25e685b..6b4531f 100644
+--- a/core/emulator.cpp
++++ b/core/emulator.cpp
+@@ -40,6 +40,7 @@
+ #include "network/net_handshake.h"
+ #include "serialize.h"
+ #include "hw/pvr/pvr.h"
++#include "hw/pvr/pvr_mem.h"
+ #include "profiler/fc_profiler.h"
+ #include "oslib/storage.h"
+ #include "wsi/context.h"
+@@ -1083,8 +1084,36 @@ bool Emulator::render()
+ 	return rend_single_frame(true); // FIXME stop flag?
+ }
+ 
++// hotd2-web: dump main RAM / VRAM at chosen vblanks (HOTD2_DUMP_FRAMES=600,1800 HOTD2_DUMP_DIR=/path)
++static void hotd2DumpHook()
++{
++	static u64 frame;
++	static std::vector<u64> frames;
++	static const char *dir;
++	static bool init;
++	if (!init)
++	{
++		init = true;
++		dir = getenv("HOTD2_DUMP_DIR");
++		if (const char *f = getenv("HOTD2_DUMP_FRAMES"))
++			for (const char *c = f; *c; c = strchr(c, ',') ? strchr(c, ',') + 1 : c + strlen(c))
++				frames.push_back(strtoull(c, nullptr, 10));
++	}
++	frame++;
++	if (dir == nullptr || std::find(frames.begin(), frames.end(), frame) == frames.end())
++		return;
++	auto dump = [&](const char *name, u8 *p, size_t sz) {
++		std::string path = std::string(dir) + "/" + name + "_" + std::to_string(frame) + ".bin";
++		if (FILE *fp = fopen(path.c_str(), "wb")) { fwrite(p, 1, sz, fp); fclose(fp); }
++	};
++	dump("ram", &mem_b[0], RAM_SIZE);
++	dump("vram", &vram[0], VRAM_SIZE);
++	NOTICE_LOG(COMMON, "hotd2-web: dumped frame %llu", (unsigned long long)frame);
++}
++
+ void Emulator::vblank()
+ {
++	hotd2DumpHook();
+ 	EventManager::event(Event::VBlank);
+ 	runner.execTasks();
+ 	// Time out if a frame hasn't been rendered for 50 ms
+-- 
+2.53.0
+
