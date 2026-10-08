@@ -104,3 +104,25 @@ code and data. Commit only tools, notes and our own code.
   not yet rendered), cart PIO/G1 DMA.
 - Current state: the harness runs past asset loading and into a steady loop
   (4000+ registers touched, 200k-access budget used up). Not yet compared against Flycast.
+
+## Session 2026-10-08
+
+Recompiler/runtime bugs fixed:
+- A function whose body reaches code *below* its entry (backward `bra` into
+  shared code) started executing at the lowest address. Now jumps to the entry.
+  This was behind all the writes through "null" pointers at boot.
+- `is_ram` covered 16 MB; NAOMI main RAM is 32 MB (`0x0C000000–0x0DFFFFFF`).
+
+HLE added:
+- hblank interrupt follows `SPG_HBLANK_INT` (mode 0/1/2) instead of every line.
+- TA parameter walker: list types, 64-byte parameters, end-of-list interrupts
+  (bits 7/8/9/10/21). `STARTRENDER` raises render-done (bits 0–2), not drawn yet.
+- AICA sound RAM (8 MB at `0x00800000`) and register storage. **Stub:** releasing
+  the ARM7 reset writes 1 to sound RAM `0x5C`, the "driver alive" word the game
+  polls (`f_0c0ba70c`). Real fix = ARM7/AICA emulation or a driver HLE.
+
+Current blocker: JVS enumeration. Flycast's RAM shows the I/O board table at
+`0x0C9C3550` (handler `0x0C0BE3A4` + board ID string) with count `1` at
+`0x0C9C8800`. Ours stays empty, the game later calls through the empty slot.
+The game only sends MIE sub-command `0x0B` in a retry cycle, so its meaning
+for this firmware is being captured from Flycast (`DUMP_JVS`).

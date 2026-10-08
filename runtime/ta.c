@@ -19,7 +19,65 @@ u32 ta_list_len;
 static u32 ta_list_cap;
 u64 ta_yuv_bytes;
 
-void ta_list_reset(void) { ta_list_len = 0; }
+/* Parameter-stream state, just enough to find list boundaries:
+ * the current list type and whether the next 32-byte block continues a 64-byte parameter. */
+static int list_type = -1;   /* -1: between lists */
+static int vertex_64;        /* vertices of the current object are 64 bytes */
+static int skip_next;
+u32 ta_lists_ended;          /* count, for debugging */
+
+void hle_raise_normal(int bit);
+
+static const int list_end_irq[5] = { 7, 8, 9, 10, 21 }; /* opaque, op. mod, trans, tr. mod, punch-through */
+
+void ta_list_reset(void)
+{
+	ta_list_len = 0;
+	list_type = -1;
+	skip_next = 0;
+}
+
+static void ta_param(const u8 *p)
+{
+	u32 pcw;
+	memcpy(&pcw, p, 4);
+	u32 para = pcw >> 29;
+	int tex = (pcw >> 3) & 1, offset = (pcw >> 2) & 1, uv16 = pcw & 1;
+	int col = (pcw >> 4) & 3, volume = (pcw >> 6) & 1;
+
+	switch (para) {
+	case 0: /* end of list */
+		if (list_type >= 0 && list_type < 5) {
+			hle_raise_normal(list_end_irq[list_type]);
+			ta_lists_ended++;
+		}
+		list_type = -1;
+		break;
+	case 4: /* polygon or modifier-volume header */
+	case 5: /* sprite header */
+		if (list_type < 0)
+			list_type = (pcw >> 24) & 7;
+		if (list_type == 1 || list_type == 3) {    /* modifier volume */
+			vertex_64 = 1;
+		} else if (para == 5) {
+			vertex_64 = 1;
+		} else {
+			/* 64-byte headers: polygon type 2 (intensity + offset, textured) and type 4 (two volumes, intensity) */
+			if ((!volume && col == 2 && tex && offset) || (volume && col == 2))
+				skip_next = 1;
+			/* 64-byte vertices: textured floating colour (5, 6) and textured two-volume (11-14) */
+			vertex_64 = tex && ((!volume && col == 1) || volume);
+		}
+		(void)uv16;
+		break;
+	case 7: /* vertex */
+		if (vertex_64)
+			skip_next = 1;
+		break;
+	default: /* user clip, object list set: 32 bytes */
+		break;
+	}
+}
 
 static void ta_fifo(const u8 *data, u32 len)
 {
@@ -29,6 +87,10 @@ static void ta_fifo(const u8 *data, u32 len)
 	}
 	memcpy(ta_list + ta_list_len, data, len);
 	ta_list_len += len;
+	for (u32 k = 0; k + 32 <= len; k += 32) {
+		if (skip_next) { skip_next = 0; continue; }
+		ta_param(data + k);
+	}
 }
 
 void ta_write(u32 addr, const u8 *data, u32 len)

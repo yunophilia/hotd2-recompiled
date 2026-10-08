@@ -315,7 +315,7 @@ class Gen:
         body, _ = self.fns[f]
         pcs = sorted(body)
         bodyset = set(pcs)
-        labels, out = set(), []
+        labels, out = {f}, []
         # first pass: collect branch targets that need labels
         for pc in pcs:
             i = decode(img.u16(pc), pc)
@@ -398,6 +398,9 @@ class Gen:
                 prev_end = pc + 4
         if prev_end is not None:
             out.append(f"\tsh4_dispatch(c, {hx(prev_end)}); /* ran off the end */")
+        if pcs and pcs[0] != f:
+            # the body reaches code below the entry point: start at the entry, not the lowest address
+            out.insert(0, f"\tgoto L_{f:08x};")
         return f"void f_{f:08x}(Sh4 *c)\n{{\n" + "\n".join(out) + "\n}\n"
 
     def goto(self, target, bodyset):

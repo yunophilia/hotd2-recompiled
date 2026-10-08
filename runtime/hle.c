@@ -101,6 +101,18 @@ static int tmu_write(u32 addr, u32 v)
 	return 0;
 }
 
+/* AICA sound RAM (8 MB on NAOMI) at 0x00800000, and its register block at
+ * 0x00700000. The ARM7 sound CPU is not emulated yet: the RAM is plain memory. */
+u8 aica_ram[0x800000];
+static u32 aica_regs[0x10000 / 4];
+
+static inline u8 *aica_ptr(u32 p)
+{
+	if (p >= 0x00800000u && p < 0x01000000u)
+		return &aica_ram[p & 0x7FFFFFu];
+	return NULL;
+}
+
 /* NAOMI battery-backed SRAM: bookkeeping, settings, high scores */
 u8 naomi_sram[0x8000];
 #define SRAM_BASE 0x00200000u
@@ -124,6 +136,7 @@ static u32 istnrm, istext, isterr;
 u64 hle_next_event = 1;
 static u32 scanline;
 u64 hle_frames;
+u64 hle_renders;
 
 #define SB(a) sb[((a) - 0x005F6800u) / 4]
 #define PVR(a) pvr[((a) - 0x005F8000u) / 4]
@@ -195,7 +208,11 @@ static void next_scanline(void)
 	scanline = (scanline + 1) % lines;
 	if (scanline == vin) { hle_raise_normal(3); hle_frames++; }   /* vblank in */
 	if (scanline == vout) hle_raise_normal(4);                    /* vblank out */
-	hle_raise_normal(5);                                          /* hblank */
+	/* hblank interrupt per SPG_HBLANK_INT: mode 0 = at the compare line,
+	 * 1 = every <compare> lines, 2 = every line */
+	u32 hint = PVR(0x005F80C8u), comp = hint & 0x3FF, mode = (hint >> 12) & 3;
+	if ((mode == 0 && scanline == comp) || (mode == 1 && comp && scanline % comp == 0) || mode == 2)
+		hle_raise_normal(5);
 }
 
 void hle_event(Sh4 *c)
@@ -236,9 +253,15 @@ u32 hle_read(u32 addr, int size)
 		return v;
 	}
 	u8 *vp = vram_ptr(p);
+	if (!vp) vp = aica_ptr(p);
 	if (vp) {
 		memcpy(&v, vp, size);
 		return v;
+	}
+	if (p >= 0x00700000u && p < 0x00710000u) {
+		v = aica_regs[(p & 0xFFFF) / 4];
+		if (hle_trace) hle_trace("R", addr, v, size);
+		return size == 4 ? v : size == 2 ? (v & 0xFFFF) : (v & 0xFF);
 	}
 	if (cart_read_reg(p, &v) || tmu_read(addr, &v)) {
 		/* handled */
@@ -316,11 +339,24 @@ void hle_write(u32 addr, u32 value, int size)
 		return;
 	}
 	u8 *vp = vram_ptr(p);
+	if (!vp) vp = aica_ptr(p);
 	if (vp) {
 		memcpy(vp, &value, size);
 		return;
 	}
 	if (hle_trace) hle_trace("W", addr, value, size);
+	if (p >= 0x00700000u && p < 0x00710000u) {
+		u32 *r = &aica_regs[(p & 0xFFFF) / 4];
+		/* STUB until the ARM7 sound CPU is emulated: when the game releases it from
+		 * reset, pretend the uploaded driver started and posted its "alive" word at
+		 * sound RAM 0x5C, which the game polls during boot (f_0c0ba70c). */
+		if (p == 0x00702C00u && (*r & 1) && !(value & 1)) {
+			u32 alive = 1;
+			memcpy(&aica_ram[0x5C], &alive, 4);
+		}
+		*r = value;
+		return;
+	}
 	if (cart_write_reg(p, value) || tmu_write(addr, value))
 		return;
 	if (p == SB_ISTNRM) { istnrm &= ~(value & 0x3FFFFFFFu); return; }  /* write 1 to clear */
@@ -337,6 +373,13 @@ void hle_write(u32 addr, u32 value, int size)
 	}
 	if (p == 0x005F6808u && (value & 1))
 		ch2_dma();
+	if (p == 0x005F8144u && (value & 0x80000000u))   /* TA_LIST_INIT */
+		ta_list_reset();
+	if (p == 0x005F8014u) {                         /* STARTRENDER: not drawn yet, report done */
+		extern u64 hle_renders;
+		hle_renders++;
+		hle_raise_normal(0); hle_raise_normal(1); hle_raise_normal(2);
+	}
 	if (p == 0x005F7418u && (value & 1) && (SB(0x005F7414u) & 1))
 		g1_dma();
 }

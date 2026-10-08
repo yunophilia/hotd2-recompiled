@@ -55,10 +55,11 @@ void trace_lowram(u32 a, int write, int size);
 static inline int is_ram(u32 a)
 {
 	if ((a & 0x1FFE0000u) == 0x0C000000u) trace_lowram(a, -1, 0);
-	return (a & 0x1F000000u) == 0x0C000000u;
+	return (a & 0x1E000000u) == 0x0C000000u;
 }
 #else
-static inline int is_ram(u32 a) { return (a & 0x1F000000u) == 0x0C000000u; }
+/* 32 MB main RAM: 0x0C000000-0x0DFFFFFF in every P0-P3 mirror */
+static inline int is_ram(u32 a) { return (a & 0x1E000000u) == 0x0C000000u; }
 #endif
 
 static inline u8 rd8(u32 a) { return is_ram(a) ? ram[a & RAM_MASK] : (u8)hle_read(a, 1); }
