@@ -64,6 +64,23 @@ which looks like the Sega SDK libraries (Kamui/Ninja-style). That is the obvious
 seam for HLE: replace those functions wholesale and leave the game code
 above them recompiled.
 
+## Recompiled boot (`tools/recomp.py` + `runtime/harness.c`)
+
+All 2242 functions recompile to C and build natively, with no unhandled opcodes.
+Started at crt0 with only the program image in RAM, the game runs through:
+
+1. BSC refresh setup: `FFA00040` (RFCR), `FFA00020`, `FFA0002C`
+2. G1 bus timing: `A05F7480–A05F74B8`
+3. Maple DMA: command list at `0x0C9D1080`, start `A05F6C04`, enable `A05F6C14`,
+   start `A05F6C18`, settings `A05F6C80` / `A05F6C8C`. It then polls `A05F6C18`
+   and keeps resending, waiting for a valid JVS reply.
+
+In steady state the list is one frame: Maple command `0x86` (JVS over Maple),
+sub-command `0x15` ("receive JVS data"), reply buffer at `0x0C9D0880`. HOTD2 is
+the special case Flycast calls `hotd2p`: it answers `0x15` and also sends the
+repeated request. **Next HLE subsystem: a JVS I/O board** (reset, set address,
+ID, feature query, switches, coins, analog/screen position for the guns).
+
 ## Not yet known
 
 - Where the PVR2 Tile Accelerator display lists are built and submitted.
