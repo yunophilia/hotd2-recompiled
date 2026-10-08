@@ -27,8 +27,9 @@ Reference emulator: Flycast `0d9853d` (see `patches/flycast/BASE_COMMIT`).
 | stack top | `0x0CA553C0` |
 | `main` | `0x0C088DA4` |
 
-- `tools/funcs.py`: 1778 functions found by recursive descent from the entry, `bsr`
-  targets and prologue pointers, covering ~490 KB (42 % of the image). The
+- `tools/funcs.py`: 2242 functions found by recursive descent from the entry, `bsr`
+  targets, `mov.l lit; jsr/jmp @rN` call sites, SHC `braf` switch tables and
+  prologue pointers, covering ~536 KB (46 % of the image). The
   rest is read-only data plus code reached only through jump tables and
   function-pointer tables still to be resolved.
 

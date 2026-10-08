@@ -33,6 +33,63 @@ class Image:
         return struct.unpack_from("<I", self.data, addr - self.lo)[0]
 
 
+def _writes(text, reg):
+    """True if the instruction text writes register `reg` (roughly: it is the last operand)."""
+    return text.endswith("," + reg) or text.endswith(" " + reg) and text.split()[0] in (
+        "movt", "dt", "shll", "shlr", "shll2", "shlr2", "shll8", "shlr8", "shll16", "shlr16",
+        "shal", "shar", "rotl", "rotr", "rotcl", "rotcr")
+
+
+def reg_literal(img, pc, reg, lookback=16):
+    """Value of a `mov.l @(lit),reg` reaching pc in straight-line code, else None."""
+    a = pc - 2
+    while a >= pc - 2 * lookback and img.has(a):
+        i = decode(img.u16(a), a)
+        if i.jump or i.cond:
+            return None
+        if _writes(i.text, reg):
+            if i.lit_size == 4 and img.has(i.lit, 4):
+                return img.u32(i.lit)
+            return None
+        a -= 2
+    return None
+
+
+def switch_targets(img, braf_pc, max_cases=256):
+    """Targets of an SHC `mova tbl,r0; mov.w @(r0,rX),r0; braf r0` switch."""
+    mova = None
+    for a in range(braf_pc - 2, braf_pc - 12, -2):
+        i = decode(img.u16(a), a)
+        if i.text.startswith("mova"):
+            mova = i.lit
+            break
+    if mova is None:
+        return []
+    # bound: the nearest "cmp/hi rB,r0" with "mov #N,rB" before it
+    bound = None
+    for a in range(braf_pc - 2, braf_pc - 40, -2):
+        if not img.has(a):
+            break
+        i = decode(img.u16(a), a)
+        if i.text.startswith("cmp/hi") and i.text.endswith(",r0"):
+            rb = i.text.split()[1].split(",")[0]
+            for b in range(a - 2, a - 20, -2):
+                j = decode(img.u16(b), b)
+                if j.text.startswith("mov #") and j.text.endswith("," + rb):
+                    bound = int(j.text.split("#")[1].split(",")[0])
+                    break
+            break
+    n = bound + 1 if bound is not None and 0 <= bound < max_cases else 0
+    out = []
+    for k in range(n):
+        if not img.has(mova + 2 * k):
+            break
+        off = img.u16(mova + 2 * k)
+        off = off - 0x10000 if off & 0x8000 else off
+        out.append(braf_pc + 4 + off)
+    return out
+
+
 def walk(img, entry):
     """Return (blocks, calls, literals) for the function starting at entry."""
     seen, todo, calls, lits = set(), [entry], set(), set()
@@ -47,6 +104,12 @@ def walk(img, entry):
                 lits.add(i.lit)
             if i.call and i.target is not None:
                 calls.add(i.target)
+            if i.indirect and i.text.startswith(("jsr", "jmp")):  # jmp = tail call
+                t = reg_literal(img, pc, i.text.split("@")[1])
+                if t is not None and img.has(t) and t % 2 == 0:
+                    calls.add(t)
+            if i.text.startswith("braf"):
+                todo.extend(t for t in switch_targets(img, pc) if img.has(t))
             if i.cond and i.target is not None:
                 todo.append(i.target)
             if i.delay:
