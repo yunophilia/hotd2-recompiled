@@ -1,9 +1,49 @@
-/* Guest coroutines on host fibers, see coro.h. Native build: ucontext. */
+/* Guest coroutines on host fibers, see coro.h. Native build: ucontext.
+ * Browser build: only same-stack longjmp is supported so far (HOTD2 has not
+ * needed a real stack switch yet); a switch request reports and aborts. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ucontext.h>
 #include "coro.h"
+
+#ifdef __EMSCRIPTEN__
+#define MAX_CTX 256
+typedef struct { u32 buf; int bound; jmp_buf jb; } Ctx;
+static Ctx ctxs[MAX_CTX];
+u32 coro_switches, coro_fibers;
+
+static Ctx *lookup(u32 buf, int create)
+{
+	buf &= 0x1FFFFFFFu;
+	Ctx *free_slot = NULL;
+	for (int i = 0; i < MAX_CTX; i++) {
+		if (ctxs[i].buf == buf) return &ctxs[i];
+		if (!ctxs[i].buf && !free_slot) free_slot = &ctxs[i];
+	}
+	if (!create || !free_slot) return NULL;
+	free_slot->buf = buf;
+	return free_slot;
+}
+
+jmp_buf *coro_bind(u32 buf)
+{
+	Ctx *x = lookup(buf, 1);
+	if (!x) { fprintf(stderr, "coro: too many contexts\n"); abort(); }
+	x->bound = 1;
+	return &x->jb;
+}
+
+void coro_restore(Sh4 *c, u32 buf)
+{
+	(void)c;
+	Ctx *x = lookup(buf, 0);
+	if (x && x->bound)
+		longjmp(x->jb, 1);
+	fprintf(stderr, "coro: restore of unsaved context %08X needs a fiber switch (not supported in the browser yet)\n", buf);
+	abort();
+}
+#else
+#include <ucontext.h>
 
 #define FIBER_STACK (2u << 20)
 #define MAX_CTX 256
@@ -96,3 +136,4 @@ void coro_restore(Sh4 *c, u32 buf)
 	switch_to(f);
 	abort(); /* unreachable: switch_to always longjmps when resumed */
 }
+#endif /* !__EMSCRIPTEN__ */

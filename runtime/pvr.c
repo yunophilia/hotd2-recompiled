@@ -383,11 +383,28 @@ static void shade(const PvrState *st, const float col[4], const float ofs[4], fl
 	} else {
 		int w = 8 << ((tsp >> 3) & 7), h = 8 << (tsp & 7);
 		if ((st->tcw >> 31) & 1) h = w;
-		int tx = wrap_coord((int)floorf(u * w), w, (tsp >> 16) & 1, (tsp >> 18) & 1);
-		int ty = wrap_coord((int)floorf(v * h), h, (tsp >> 15) & 1, (tsp >> 17) & 1);
-		u8 t8[4];
-		pvr_texel(tsp, st->tcw, tx, ty, t8);
-		float t[4] = { t8[0] / 255.f, t8[1] / 255.f, t8[2] / 255.f, (tsp >> 19) & 1 ? 1 : t8[3] / 255.f };
+		int cu = (tsp >> 16) & 1, cv = (tsp >> 15) & 1, fu = (tsp >> 18) & 1, fv = (tsp >> 17) & 1;
+		float t[4];
+		if ((tsp >> 13) & 3) {
+			/* bilinear: blend the four texels around the sample point */
+			float fx = u * w - 0.5f, fy = v * h - 0.5f;
+			int ix = (int)floorf(fx), iy = (int)floorf(fy);
+			float ax = fx - ix, ay = fy - iy;
+			float acc[4] = { 0, 0, 0, 0 };
+			for (int k = 0; k < 4; k++) {
+				int dx = k & 1, dy = k >> 1;
+				u8 t8[4];
+				pvr_texel(tsp, st->tcw, wrap_coord(ix + dx, w, cu, fu), wrap_coord(iy + dy, h, cv, fv), t8);
+				float wt = (dx ? ax : 1 - ax) * (dy ? ay : 1 - ay);
+				for (int i = 0; i < 4; i++) acc[i] += t8[i] * wt;
+			}
+			for (int i = 0; i < 4; i++) t[i] = acc[i] / 255.f;
+		} else {
+			u8 t8[4];
+			pvr_texel(tsp, st->tcw, wrap_coord((int)floorf(u * w), w, cu, fu), wrap_coord((int)floorf(v * h), h, cv, fv), t8);
+			for (int i = 0; i < 4; i++) t[i] = t8[i] / 255.f;
+		}
+		if ((tsp >> 19) & 1) t[3] = 1;
 		switch ((tsp >> 6) & 3) {
 		case 0: out[0] = t[0]; out[1] = t[1]; out[2] = t[2]; out[3] = t[3]; break;
 		case 1: for (int i = 0; i < 3; i++) out[i] = t[i] * c[i]; out[3] = t[3]; break;
@@ -470,6 +487,63 @@ static void raster_tri(void *user, const PvrState *st, const PvrVert *a, const P
 	}
 }
 
+/* 32-bit word from VRAM through the 32-bit path (two interleaved 8 MB banks) */
+static u32 vram32(u32 o)
+{
+	o &= 0xFFFFFC;
+	u32 lin = ((o & 0x7FFFFC) << 1) | (((o >> 23) & 1) << 2);
+	return (u32)vb(lin) | (u32)vb(lin + 1) << 8 | (u32)vb(lin + 2) << 16 | (u32)vb(lin + 3) << 24;
+}
+
+/* The background polygon lives in VRAM at PARAM_BASE + tag address (ISP_BACKGND_T):
+ * ISP, TSP, TCW, then three vertices of x, y, z, [uv], colour, [offset colour]. */
+static void draw_background(Raster *r)
+{
+	u32 tag = pvr_reg(0x005F808Cu);
+	u32 base = (pvr_reg(0x005F8020u) & 0xF00000) + (((tag >> 3) & 0x1FFFFF) * 4);
+	u32 skip = (tag >> 24) & 7;
+	PvrState st;
+	memset(&st, 0, sizeof st);
+	st.isp = vram32(base);
+	st.tsp = vram32(base + 4);
+	st.tcw = vram32(base + 8);
+	st.textured = (st.isp >> 25) & 1;
+	st.offset = (st.isp >> 24) & 1;
+	st.gouraud = (st.isp >> 23) & 1;
+	int uv16f = (st.isp >> 22) & 1;
+	PvrVert v[4];
+	u32 a = base + 12;
+	for (int k = 0; k < 3; k++) {
+		u32 w[8];
+		for (u32 i = 0; i < 3 + skip && i < 8; i++) w[i] = vram32(a + 4 * i);
+		memset(&v[k], 0, sizeof v[k]);
+		memcpy(&v[k].x, &w[0], 4); memcpy(&v[k].y, &w[1], 4); memcpy(&v[k].z, &w[2], 4);
+		int i = 3;
+		if (st.textured) {
+			if (uv16f) uv16(w[i++], &v[k].u, &v[k].v);
+			else { memcpy(&v[k].u, &w[i], 4); memcpy(&v[k].v, &w[i + 1], 4); i += 2; }
+		}
+		packed(w[i++], v[k].col);
+		if (st.offset) packed(w[i], v[k].ofs);
+		a += 4 * (3 + skip);
+	}
+	/* fourth corner completes the parallelogram */
+	v[3] = v[2];
+	v[3].x = v[0].x + v[2].x - v[1].x; v[3].y = v[0].y + v[2].y - v[1].y;
+	v[3].u = v[0].u + v[2].u - v[1].u; v[3].v = v[0].v + v[2].v - v[1].v;
+	float depth;
+	u32 d = pvr_reg(0x005F8088u);
+	memcpy(&depth, &d, 4);
+	for (int k = 0; k < 4; k++) v[k].z = depth;
+	st.list = 0;
+	st.isp = (st.isp & ~(7u << 29)) | (7u << 29);   /* always pass */
+	int saved = r->pass;
+	r->pass = 0;
+	raster_tri(r, &st, &v[0], &v[1], &v[2]);
+	raster_tri(r, &st, &v[0], &v[2], &v[3]);
+	r->pass = saved;
+}
+
 void pvr_render_soft(const u8 *list, u32 len, u8 *rgba)
 {
 	static float zbuf[W * H];
@@ -479,6 +553,7 @@ void pvr_render_soft(const u8 *list, u32 len, u8 *rgba)
 		rgba[4 * i] = rgba[4 * i + 1] = rgba[4 * i + 2] = 0;
 		rgba[4 * i + 3] = 255;
 	}
+	draw_background(&r);
 	static const int order[3] = { 0, 4, 2 };  /* opaque, punch-through, translucent */
 	for (int k = 0; k < 3; k++) {
 		r.pass = order[k];

@@ -88,8 +88,14 @@ static void shot_on_render(u64 render, const u8 *list, u32 len)
 }
 
 /* HOTD2_DUMP_FRAMES=700,900 writes ram_<frame>.bin, same as the patched Flycast */
+static u64 frame_limit;   /* HOTD2_FRAMES: stop after this many frames */
+
+static void stop(const char *why);
+
 static void dump_on_frame(u64 frame)
 {
+	if (frame_limit && frame >= frame_limit)
+		stop("frame limit reached");
 	static const char *spec;
 	if (!spec && !(spec = getenv("HOTD2_DUMP_FRAMES"))) spec = "";
 	for (const char *p = spec; *p; ) {
@@ -247,7 +253,10 @@ int main(int argc, char **argv)
 	hle_on_frame = dump_on_frame;
 	extern void (*hle_on_render)(u64 render, const u8 *list, u32 len);
 	hle_on_render = shot_on_render;
-	hle_trace = hw_trace;
+	/* HOTD2_TRACE=0 turns off per-access tracing (and the access budget) to measure speed */
+	hle_trace = (getenv("HOTD2_TRACE") && getenv("HOTD2_TRACE")[0] == '0') ? NULL : hw_trace;
+	if (getenv("HOTD2_FRAMES"))
+		frame_limit = strtoull(getenv("HOTD2_FRAMES"), NULL, 10);
 	signal(SIGTERM, dump_ring);
 	signal(SIGINT, dump_ring);
 	fprintf(stderr, "running from %08X\n", entry);

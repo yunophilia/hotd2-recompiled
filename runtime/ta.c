@@ -156,7 +156,9 @@ void ta_write(u32 addr, const u8 *data, u32 len)
 	} else if (p < 0x11000000u) {
 		ta_yuv_bytes += len;
 	} else {
+		extern void glframe_vram_dirty(u32 off, u32 len);
 		u32 o = p & 0xFFFFFFu;
 		for (u32 k = 0; k < len; k++) vram[(o + k) & 0xFFFFFFu] = data[k];
+		glframe_vram_dirty(o, len);
 	}
 }

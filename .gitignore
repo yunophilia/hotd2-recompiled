@@ -7,3 +7,4 @@ build/
 out/
 __pycache__/
 web/flycast/
+web/game/

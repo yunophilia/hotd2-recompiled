@@ -201,3 +201,17 @@ stop, and dumps RAM at chosen frames (`HOTD2_DUMP_FRAMES`).
 - Boot warning screen and the 3D attract scene render correctly. Known gaps: no
   background plane yet (black band), some translucent smoke renders blocky, and
   the warning shows the Japan region text (region likely read from BIOS/EEPROM).
+
+### Browser build running (2026-10-08)
+
+- `runtime/build-web.sh` builds the recompiled game with Emscripten (pthreads,
+  -O2, 14 MB wasm) into `web/game/` (gitignored). `web/play/` is the front end:
+  zip reader on `DecompressionStream`, cart assembly in JS (no BIOS needed),
+  WebGL2 renderer, mouse/keyboard → JVS input.
+- `runtime/web.c`: game thread paced to 60 Hz at vblank-in; `runtime/glframe.c`
+  turns each STARTRENDER list into vertices + draw calls + a texture cache
+  invalidated by per-4 KB VRAM page generations and palette writes.
+- Measured: native game code 221 fps without tracing (`HOTD2_TRACE=0`);
+  browser: steady 60 game fps and 60 renders/s in attract mode.
+- Coroutines in the browser support same-stack longjmp only; a true stack switch
+  aborts with a message (not needed so far).

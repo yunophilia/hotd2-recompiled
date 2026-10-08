@@ -15,6 +15,12 @@ static u32 rom_size;
 static u32 pio_offset, dma_offset;
 static int pio_autoinc;
 
+void cart_set_image(u8 *image, u32 size)
+{
+	rom = image;
+	rom_size = size;
+}
+
 int cart_load(const char *path)
 {
 	FILE *f = fopen(path, "rb");

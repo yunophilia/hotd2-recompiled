@@ -10,6 +10,7 @@
 #include "jvs.h"
 #include "cart.h"
 #include "ta.h"
+#include "glframe.h"
 
 void (*hle_trace)(const char *kind, u32 addr, u32 value, int size);
 static Sh4 *hle_cpu;
@@ -365,11 +366,18 @@ void hle_write(u32 addr, u32 value, int size)
 		value = 0;
 	}
 	u8 *vp = vram_ptr(p);
-	if (!vp) vp = aica_ptr(p);
+	if (vp) {
+		memcpy(vp, &value, size);
+		glframe_vram_dirty((u32)(vp - vram), (u32)size);
+		return;
+	}
+	vp = aica_ptr(p);
 	if (vp) {
 		memcpy(vp, &value, size);
 		return;
 	}
+	if (p >= 0x005F9000u && p < 0x005FA000u)
+		glframe_palette_dirty();
 	if (hle_trace) hle_trace("W", addr, value, size);
 	if (p >= 0x00700000u && p < 0x00710000u) {
 		u32 *r = &aica_regs[(p & 0xFFFF) / 4];
