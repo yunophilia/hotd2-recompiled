@@ -1,0 +1,52 @@
+From 757e57f0264e7e52bb8be74519206f3d9dcf02d4 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ivan=20H=2E=20=F0=9F=8F=B3=EF=B8=8F=E2=80=8D=F0=9F=8C=88?=
+ =?UTF-8?q?=F0=9F=8F=B3=EF=B8=8F=E2=80=8D=E2=9A=A7=EF=B8=8F?=
+ <ivankun16.5@gmail.com>
+Date: Thu, 8 Oct 2026 16:39:45 -0700
+Subject: [PATCH] Sound RAM, AICA register and PCM dumps
+
+---
+ core/audio/audiostream.cpp | 5 +++++
+ core/emulator.cpp          | 3 +++
+ 2 files changed, 8 insertions(+)
+
+diff --git a/core/audio/audiostream.cpp b/core/audio/audiostream.cpp
+index 3799393..52f3be8 100644
+--- a/core/audio/audiostream.cpp
++++ b/core/audio/audiostream.cpp
+@@ -50,6 +50,11 @@ AudioBackend *AudioBackend::getBackend(const std::string& slug)
+ 
+ void WriteSample(s16 r, s16 l)
+ {
++	// hotd2-web: raw 44.1 kHz stereo dump of the AICA output for comparison (HOTD2_PCM=file)
++	static FILE *pcm;
++	static bool checked;
++	if (!checked) { checked = true; if (const char *f = getenv("HOTD2_PCM")) pcm = fopen(f, "wb"); }
++	if (pcm) { s16 lr[2] = { l, r }; fwrite(lr, 2, 2, pcm); }
+ 	Buffer[writePtr].r = r * config::AudioVolume.dbPower();
+ 	Buffer[writePtr].l = l * config::AudioVolume.dbPower();
+ 
+diff --git a/core/emulator.cpp b/core/emulator.cpp
+index 6b4531f..b36674a 100644
+--- a/core/emulator.cpp
++++ b/core/emulator.cpp
+@@ -21,6 +21,7 @@
+ #include "stdclass.h"
+ #include "cfg/option.h"
+ #include "hw/aica/aica_if.h"
++#include "hw/aica/aica_mem.h"
+ #include "imgread/common.h"
+ #include "hw/naomi/naomi_cart.h"
+ #include "reios/reios.h"
+@@ -1108,6 +1109,8 @@ static void hotd2DumpHook()
+ 	};
+ 	dump("ram", &mem_b[0], RAM_SIZE);
+ 	dump("vram", &vram[0], VRAM_SIZE);
++	dump("aram", &aica::aica_ram[0], ARAM_SIZE);
++	dump("aregs", &aica::aica_reg[0], 0x8000);
+ 	NOTICE_LOG(COMMON, "hotd2-web: dumped frame %llu", (unsigned long long)frame);
+ }
+ 
+-- 
+2.53.0
+
