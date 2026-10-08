@@ -140,6 +140,7 @@ u64 hle_next_event = 1;
 static u32 scanline;
 u64 hle_frames;
 u64 hle_renders;
+u32 hle_region = 1;   /* BIOS region seen by the game: 0 Japan, 1 USA (default), 2 Export */
 void (*hle_on_frame)(u64 frame);   /* debug hook, called at every vblank-in */
 /* called at STARTRENDER with the display list being drawn */
 void (*hle_on_render)(u64 render, const u8 *list, u32 len);
@@ -291,6 +292,8 @@ u32 hle_read(u32 addr, int size)
 		v = istext;
 	} else if (p == SB_ISTERR) {
 		v = isterr;
+	} else if (p == 0x00040000u) {
+		v = hle_region;    /* BIOS region word the game checks: 0 Japan, 1 USA, 2 Export */
 	} else if (p == 0x005F689Cu) {
 		v = 0x0B;          /* SB_SBREV: Holly system-bus revision; selects the SDK's feature set */
 	} else if (p == 0x005F8000u) {

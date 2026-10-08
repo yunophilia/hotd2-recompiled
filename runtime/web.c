@@ -105,6 +105,8 @@ static void *game_thread(void *arg)
 EMSCRIPTEN_KEEPALIVE void *web_alloc(u32 n) { return malloc(n); }
 EMSCRIPTEN_KEEPALIVE void web_set_program(u8 *p, u32 n) { program = p; program_len = n; }
 EMSCRIPTEN_KEEPALIVE void web_set_cart(u8 *p, u32 n) { cart_set_image(p, n); }
+extern u32 hle_region;
+EMSCRIPTEN_KEEPALIVE void web_set_region(u32 r) { hle_region = r; }   /* 0 Japan, 1 USA, 2 Export */
 EMSCRIPTEN_KEEPALIVE JvsInput *web_input(void) { return &jvs_input; }
 EMSCRIPTEN_KEEPALIVE u32 web_frames(void) { return game_frames; }
 EMSCRIPTEN_KEEPALIVE u32 web_renders(void) { return game_renders; }

@@ -290,6 +290,9 @@ int main(int argc, char **argv)
 	cpu.r[15] = 0x0CA553C0u;
 	if (getenv("HW_BUDGET"))
 		MAX_HW = strtoul(getenv("HW_BUDGET"), NULL, 0);
+	extern u32 hle_region;
+	if (getenv("HOTD2_REGION"))
+		hle_region = (u32)strtoul(getenv("HOTD2_REGION"), NULL, 0);
 	extern void hle_init(Sh4 *c);
 	extern int cart_load(const char *path);
 	const char *cart = getenv("HOTD2_CART") ? getenv("HOTD2_CART") : "cart.bin";
