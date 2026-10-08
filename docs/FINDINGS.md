@@ -126,3 +126,38 @@ Current blocker: JVS enumeration. Flycast's RAM shows the I/O board table at
 `0x0C9C8800`. Ours stays empty, the game later calls through the empty slot.
 The game only sends MIE sub-command `0x0B` in a retry cycle, so its meaning
 for this firmware is being captured from Flycast (`DUMP_JVS`).
+
+### Later on 2026-10-08
+
+Fixed / added:
+- **Maple reply bug**: replies were written byte-by-byte to the same address
+  (missing `+ k`), so every reply collapsed to its last byte. Fixed.
+- MIE: `0x82` get-ID (reply code `0x83`, ID string the game compares byte for
+  byte against `.data` at `0x0C143FA0`), `0x80` Z80 firmware upload (per-chunk
+  8-bit checksum ack). After the upload the bridge runs HOTD2's firmware mode:
+  sub-commands `0x13`/`0x17` swap, replies framed `(status, len, data)`, sense `0x8E`.
+- JVS board: analog inputs (8 × 16-bit) instead of screen position, guns on
+  channels 0–3 scaled from 640×480, idle channels `0x8000`; packet checksum.
+  Byte-identical to Flycast's replies in a real capture (`DUMP_JVS` build).
+- Sound command ring at sound RAM `0x400–0x4FF` (64 slots; driver zeroes a slot
+  to consume it). Stub consumes and records commands.
+- **Coroutines**: HOTD2 switches tasks with save-context `0x0C0BA0C0` /
+  restore-context `0x0C0BA126` (setjmp/longjmp style, full register file). Calls
+  to save are wrapped in a host `setjmp` (`CORO_SAVE`), restore goes to
+  `coro_restore()` which switches host fibers (ucontext natively; the browser
+  build will need Emscripten fibers). Not exercised yet: no switches so far.
+- Discovery: code literals and data-section words that point into code are
+  function pointers (task handlers, state tables): 2337 → 2723 functions.
+
+Current state: boot runs to frame ~864 (822 rendered frames, 1644 TA lists,
+170 firmware chunks, 3800 cart DMAs), then the main loop keeps running but
+rendering stops. Flycast passes the same point (display-list sequence `0x336`,
+around its frame 1210) without pausing. Compared by game progress, Flycast
+then fills a table at `0x0C99D15C` (60-byte entries, base `0x0C993FE0`,
+code `f_0c09a374`) that stays zero for us. `f_0c0b8264` (run-task, 16 callers)
+is never reached in our run.
+
+Tools: `tools/statediff.py` (state diff aligned by progress), `tools/tasks.py`,
+`tools/ramcmp.py`, `tools/disraw.py`, `tools/biosarea.py`; harness prints
+register histogram, IRQ state, TA parser state, fibers and sound commands at
+stop, and dumps RAM at chosen frames (`HOTD2_DUMP_FRAMES`).

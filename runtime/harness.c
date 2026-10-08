@@ -8,6 +8,7 @@
  */
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <signal.h>
 #include <unistd.h>
 #include "sh4ctx.h"
@@ -42,6 +43,9 @@ static void print_counts(void)
 	fprintf(stderr, "--- frames %llu, renders %llu, TA lists ended %u, YUV bytes %llu, cycles %llu ---\n",
 		(unsigned long long)hle_frames, (unsigned long long)hle_renders, ta_lists_ended,
 		(unsigned long long)ta_yuv_bytes, (unsigned long long)cpu.cycles);
+	extern u32 coro_switches, coro_fibers, sound_cmd_count;
+	fprintf(stderr, "--- task fibers %u, task switches %u, sound commands %u ---\n",
+		coro_fibers, coro_switches, sound_cmd_count);
 	fprintf(stderr, "--- most-accessed registers ---\n");
 	for (int top = 0; top < 15; top++) {
 		int best = -1;
@@ -54,6 +58,24 @@ static void print_counts(void)
 }
 
 extern u32 hle_read(u32 addr, int size);
+
+/* HOTD2_DUMP_FRAMES=700,900 writes ram_<frame>.bin, same as the patched Flycast */
+static void dump_on_frame(u64 frame)
+{
+	static const char *spec;
+	if (!spec && !(spec = getenv("HOTD2_DUMP_FRAMES"))) spec = "";
+	for (const char *p = spec; *p; ) {
+		if (strtoull(p, NULL, 10) == frame) {
+			char name[64];
+			snprintf(name, sizeof name, "hram_%llu.bin", (unsigned long long)frame);
+			FILE *f = fopen(name, "wb");
+			if (f) { fwrite(ram, 1, RAM_SIZE, f); fclose(f); }
+		}
+		const char *comma = strchr(p, ',');
+		if (!comma) break;
+		p = comma + 1;
+	}
+}
 
 static void print_irq_state(void)
 {
@@ -83,6 +105,8 @@ static void stop(const char *why)
 	if (dump) { fwrite(ram, 1, RAM_SIZE, dump); fclose(dump); }
 	print_counts();
 	print_irq_state();
+	extern void ta_debug(void);
+	ta_debug();
 	exit(0);
 }
 
@@ -191,6 +215,8 @@ int main(int argc, char **argv)
 	if (!cart_load(cart))
 		fprintf(stderr, "warning: no cart image (%s); cart reads return 0xFF\n", cart);
 	hle_init(&cpu);
+	extern void (*hle_on_frame)(u64 frame);
+	hle_on_frame = dump_on_frame;
 	hle_trace = hw_trace;
 	signal(SIGTERM, dump_ring);
 	signal(SIGINT, dump_ring);

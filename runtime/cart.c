@@ -74,6 +74,10 @@ int cart_write_reg(u32 p, u32 v)
 
 void cart_dma(u32 dst, u32 len)
 {
+	static FILE *log;
+	static int checked;
+	if (!checked) { checked = 1; if (getenv("CART_LOG")) log = fopen("cart_dma.log", "w"); }
+	if (log) { fprintf(log, "%08X %08X %08X %08X\n", dma_offset, translate(dma_offset), len, dst); fflush(log); }
 	for (u32 k = 0; k < len; k++) {
 		u32 o = translate(dma_offset + k);
 		wr8(dst + k, rom_byte(o));

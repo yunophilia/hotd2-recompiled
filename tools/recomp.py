@@ -373,7 +373,13 @@ class Gen:
                 out.append(f"\t{{ c->pr = {hx(pc + 4)}; {slot} {self.call_expr(i.target)} }}")
             elif name == "jsr":
                 t = funcs.reg_literal(img, pc, f"r{rn}")
-                direct = f"if (tgt == {hx(t)}) f_{t:08x}(c); else " if t in self.fns else ""
+                if t == CORO_SAVE:
+                    # host setjmp in this frame, so a later restore-context resumes right here
+                    direct = f"if (tgt == {hx(t)}) {{ CORO_SAVE(c); }} else "
+                elif t in self.fns:
+                    direct = f"if (tgt == {hx(t)}) f_{t:08x}(c); else "
+                else:
+                    direct = ""
                 out.append(f"\t{{ u32 tgt = c->r[{rn}]; c->pr = {hx(pc + 4)}; {slot} {direct}sh4_dispatch(c, tgt); }}")
             elif name == "bsrf":
                 out.append(f"\t{{ u32 tgt = {hx(pc + 4)} + c->r[{rn}]; c->pr = {hx(pc + 4)}; {slot} sh4_dispatch(c, tgt); }}")
@@ -401,6 +407,11 @@ class Gen:
         if pcs and pcs[0] != f:
             # the body reaches code below the entry point: start at the entry, not the lowest address
             out.insert(0, f"\tgoto L_{f:08x};")
+        if f == CORO_RESTORE:
+            # keep the original register reload, then switch fibers natively (never returns)
+            return (f"static void f_{f:08x}_load(Sh4 *c)\n{{\n" + "\n".join(out) + "\n}\n"
+                    f"void f_{f:08x}(Sh4 *c)\n{{\n\tu32 buf = c->r[4];\n"
+                    f"\tf_{f:08x}_load(c);\n\tcoro_restore(c, buf);\n}}\n")
         return f"void f_{f:08x}(Sh4 *c)\n{{\n" + "\n".join(out) + "\n}\n"
 
     def goto(self, target, bodyset):
@@ -409,7 +420,11 @@ class Gen:
         return f"{{ {self.call_expr(target)} return; }}"
 
 
-HEADER = '#include "sh4ctx.h"\n#include "sh4ops.h"\n#include "funcs.h"\n\n'
+HEADER = '#include "sh4ctx.h"\n#include "sh4ops.h"\n#include "coro.h"\n#include "funcs.h"\n\n'
+
+# HOTD2's task switch primitives (see runtime/coro.h)
+CORO_SAVE = 0x0C0BA0C0
+CORO_RESTORE = 0x0C0BA126
 
 
 def main():

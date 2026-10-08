@@ -105,6 +105,8 @@ static int tmu_write(u32 addr, u32 v)
  * 0x00700000. The ARM7 sound CPU is not emulated yet: the RAM is plain memory. */
 u8 aica_ram[0x800000];
 static u32 aica_regs[0x10000 / 4];
+u32 sound_cmds[256];       /* last commands posted to the sound driver */
+u32 sound_cmd_count;
 
 static inline u8 *aica_ptr(u32 p)
 {
@@ -137,6 +139,7 @@ u64 hle_next_event = 1;
 static u32 scanline;
 u64 hle_frames;
 u64 hle_renders;
+void (*hle_on_frame)(u64 frame);   /* debug hook, called at every vblank-in */
 
 #define SB(a) sb[((a) - 0x005F6800u) / 4]
 #define PVR(a) pvr[((a) - 0x005F8000u) / 4]
@@ -206,7 +209,7 @@ static void next_scanline(void)
 	u32 vint = PVR(SPG_VBLANK_INT);
 	u32 vin = vint ? (vint & 0x3FF) : 0x208, vout = vint ? ((vint >> 16) & 0x3FF) : 0x015;
 	scanline = (scanline + 1) % lines;
-	if (scanline == vin) { hle_raise_normal(3); hle_frames++; }   /* vblank in */
+	if (scanline == vin) { hle_raise_normal(3); hle_frames++; if (hle_on_frame) hle_on_frame(hle_frames); }   /* vblank in */
 	if (scanline == vout) hle_raise_normal(4);                    /* vblank out */
 	/* hblank interrupt per SPG_HBLANK_INT: mode 0 = at the compare line,
 	 * 1 = every <compare> lines, 2 = every line */
@@ -253,9 +256,14 @@ u32 hle_read(u32 addr, int size)
 		return v;
 	}
 	u8 *vp = vram_ptr(p);
-	if (!vp) vp = aica_ptr(p);
 	if (vp) {
 		memcpy(&v, vp, size);
+		return v;
+	}
+	vp = aica_ptr(p);
+	if (vp) {
+		memcpy(&v, vp, size);
+		if (hle_trace) hle_trace("A", addr, v, size);   /* sound RAM reads: driver handshakes */
 		return v;
 	}
 	if (p >= 0x00700000u && p < 0x00710000u) {
@@ -337,6 +345,13 @@ void hle_write(u32 addr, u32 value, int size)
 	if (p - SRAM_BASE < sizeof(naomi_sram)) {
 		memcpy(naomi_sram + (p - SRAM_BASE), &value, size);
 		return;
+	}
+	/* STUB until the sound driver is emulated: the game posts 32-bit commands into
+	 * a 64-slot ring at sound RAM 0x400-0x4FF and the driver frees each slot by
+	 * zeroing it. Record the command and free the slot at once. */
+	if (p >= 0x00800400u && p < 0x00800500u && size == 4 && value) {
+		sound_cmds[sound_cmd_count++ % 256] = value;
+		value = 0;
 	}
 	u8 *vp = vram_ptr(p);
 	if (!vp) vp = aica_ptr(p);

@@ -37,10 +37,23 @@ void ta_list_reset(void)
 	skip_next = 0;
 }
 
+static u32 recent_pcw[16];
+static unsigned recent_pos;
+
+void ta_debug(void)
+{
+	fprintf(stderr, "--- TA: open list %d, %u bytes this frame, skip_next %d, vertex_64 %d; last PCWs:",
+		list_type, ta_list_len, skip_next, vertex_64);
+	for (unsigned k = 0; k < 16; k++)
+		fprintf(stderr, " %08X", recent_pcw[(recent_pos + k) % 16]);
+	fprintf(stderr, "\n");
+}
+
 static void ta_param(const u8 *p)
 {
 	u32 pcw;
 	memcpy(&pcw, p, 4);
+	recent_pcw[recent_pos++ % 16] = pcw;
 	u32 para = pcw >> 29;
 	int tex = (pcw >> 3) & 1, offset = (pcw >> 2) & 1, uv16 = pcw & 1;
 	int col = (pcw >> 4) & 3, volume = (pcw >> 6) & 1;

@@ -177,6 +177,7 @@ def discover(img):
         v = struct.unpack_from("<I", img.data, off)[0]
         if img.has(v) and v % 2 == 0 and img.u16(v) in PROLOGUES:
             todo.append(v)
+    all_lits = set()
     while todo:
         f = todo.pop()
         if f in funcs or not img.has(f):
@@ -184,11 +185,39 @@ def discover(img):
         body, calls, lits = walk(img, f)
         funcs[f] = (body, calls)
         todo.extend(calls)
+        all_lits |= lits
         for a in lits:
             if img.has(a, 4):
                 v = img.u32(a)
                 if img.has(v) and v % 2 == 0 and img.u16(v) in PROLOGUES:
                     todo.append(v)
+    # Second pass: code literals pointing anywhere inside the code we found are
+    # function pointers stored at run time (task handlers, callbacks), whatever
+    # their first instruction is.
+    code_lo = min(funcs)
+    code_hi = max(pc for body, _ in funcs.values() for pc in body) + 2
+    for a in sorted(all_lits):
+        if not img.has(a, 4):
+            continue
+        v = img.u32(a)
+        if v % 2 or not (code_lo <= v < code_hi) or v in funcs:
+            continue
+        if all(decode(img.u16(v + 2 * k), v + 2 * k).valid for k in range(6)):
+            todo.append(v)
+    # Function-pointer tables in the data after the code (state machines, dispatchers).
+    for off in range((code_hi - img.lo + 3) & ~3, len(img.data) - 3, 4):
+        v = struct.unpack_from("<I", img.data, off)[0]
+        if v % 2 or not (code_lo <= v < code_hi) or v in funcs:
+            continue
+        if all(decode(img.u16(v + 2 * k), v + 2 * k).valid for k in range(6)):
+            todo.append(v)
+    while todo:
+        f = todo.pop()
+        if f in funcs or not img.has(f):
+            continue
+        body, calls, lits = walk(img, f)
+        funcs[f] = (body, calls)
+        todo.extend(calls)
     return funcs
 
 

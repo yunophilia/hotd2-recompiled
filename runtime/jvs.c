@@ -47,7 +47,7 @@ static u32 board_message(const u8 *in, u32 len, u8 *out)
 		static const u8 features[] = {
 			0x01, 2, 13, 0,   /* switches: 2 players, 13 each */
 			0x02, 2, 0, 0,    /* coin slots */
-			0x06, 16, 16, 2,  /* screen position: 16-bit X/Y, 2 channels */
+			0x03, 8, 16, 0,   /* analog: 8 channels, 16 bits (HOTD2 reads the guns here) */
 			0x12, 6, 0, 0,    /* general purpose outputs */
 			0x00,
 		};
@@ -81,9 +81,20 @@ static u32 board_message(const u8 *in, u32 len, u8 *out)
 					out[n++] = (u8)c;
 				}
 				i += 2;
-			} else if (cmd == 0x22) {   /* analog: none, report zeros */
+			} else if (cmd == 0x22) {   /* analog: guns as P1 X/Y, P2 X/Y (0..639/479 scaled to 16 bits,
+			                               0 when off-screen); unused channels sit centred at 0x8000 */
 				out[n++] = 1;
-				for (u32 ch = 0; ch < in[i + 1]; ch++) { out[n++] = 0; out[n++] = 0; }
+				for (u32 ch = 0; ch < in[i + 1]; ch++) {
+					u32 p = ch / 2;
+					u16 v = 0x8000;
+					if (p < 2) {
+						v = 0;
+						if (!jvs_input.offscreen[p])
+							v = (ch & 1) ? (u16)(jvs_input.gun_y[p] * 0xFFFFu / 479)
+							             : (u16)(jvs_input.gun_x[p] * 0xFFFFu / 639);
+					}
+					out[n++] = (u8)(v >> 8); out[n++] = (u8)v;
+				}
 				i += 2;
 			} else if (cmd == 0x25) {   /* screen position, 1-based channel */
 				u32 p = in[i + 1] - 1;
@@ -117,7 +128,11 @@ static u32 board_message(const u8 *in, u32 len, u8 *out)
 		break;
 	}
 	}
-	out[len_at] = (u8)(n - 2);
+	out[len_at] = (u8)(n - 2);        /* bytes after the length field, checksum included */
+	u8 sum = 0;                       /* checksum: 8-bit sum of everything after the E0 sync */
+	for (u32 k = 1; k < n; k++)
+		sum += out[k];
+	out[n++] = sum;
 	return n;
 }
 
@@ -126,6 +141,11 @@ static u32 board_message(const u8 *in, u32 len, u8 *out)
 static u8 repeat_req[NODES][256];
 static u8 rx_buf[32][300];
 static u32 rx_len[32];
+
+/* After the game uploads its own MIE firmware, the bridge speaks a variant of
+ * the protocol: sub-commands 0x13/0x17 swap meaning, queued replies are framed
+ * as (status, length, data) and the sense byte is always 0x8E. */
+static int hotd2_fw;
 
 static void deliver(u32 node, u32 channel, const u8 *msg, u32 len)
 {
@@ -136,9 +156,15 @@ static void deliver(u32 node, u32 channel, const u8 *msg, u32 len)
 	if (n == 0 || rx_len[channel] + n + 3 > sizeof(rx_buf[0]))
 		return;
 	u8 *p = rx_buf[channel] + rx_len[channel];
-	p[0] = (u8)node; p[1] = 0; p[2] = (u8)n;
-	memcpy(p + 3, reply, n);
-	rx_len[channel] += n + 3;
+	if (hotd2_fw) {
+		p[0] = 0; p[1] = (u8)n;              /* status ok, length */
+		memcpy(p + 2, reply, n);
+		rx_len[channel] += n + 2;
+	} else {
+		p[0] = (u8)node; p[1] = 0; p[2] = (u8)n;
+		memcpy(p + 3, reply, n);
+		rx_len[channel] += n + 3;
+	}
 }
 
 /* Send msg to node (or all), optionally combined with the node's stored repeat request. */
@@ -168,12 +194,14 @@ static void transmit(u32 node, u32 channel, const u8 *msg, u32 len, int with_rep
 	deliver(node, channel, buf, len);
 }
 
-static inline u8 sense(u32 node) { return node == NODES ? 0x8E : 0x8F; }
+static inline u8 sense(u32 node) { return hotd2_fw || node == NODES ? 0x8E : 0x8F; }
 
 typedef struct { u8 *p; u32 n; } Out;
 static void o8(Out *o, u8 v) { o->p[o->n++] = v; }
 static void o32(Out *o, u32 v) { memcpy(o->p + o->n, &v, 4); o->n += 4; }
-static void hdr(Out *o, u32 words) { o8(o, 0x87); o8(o, 0); o8(o, 0x20); o8(o, (u8)words); }
+/* in-band reply header: response code, 0x00, sender 0x20, size in words */
+static void hdr_code(Out *o, u8 code, u32 words) { o8(o, code); o8(o, 0); o8(o, 0x20); o8(o, (u8)words); }
+static void hdr(Out *o, u32 words) { hdr_code(o, 0x87, words); }  /* JVS reply */
 
 static void receive(Out *o, u32 channel)
 {
@@ -209,6 +237,8 @@ static u32 mie_86(const u8 *in, u32 inlen, u8 *outp)
 	Out o = { outp, 0 };
 	if (inlen == 0) { hdr(&o, 0); return o.n; }
 	u8 sub = in[0];
+	if (hotd2_fw && (sub == 0x13 || sub == 0x17))
+		sub ^= 0x13 ^ 0x17;
 	u32 node = 0, len = 0, channel = 0;
 	const u8 *msg = NULL;
 	if (inlen >= 3) {
@@ -286,6 +316,38 @@ static u32 mie_86(const u8 *in, u32 inlen, u8 *outp)
 	return o.n;
 }
 
+/* Maple commands 0x80 / 0x82 to the MIE; the reply headers are written in-band
+ * like 0x86. Returns the reply length in bytes. */
+static u32 mie_firmware_or_id(u8 cmd, const u8 *in, u32 inlen, u8 *outp)
+{
+	Out o = { outp, 0 };
+	if (cmd == 0x82) {
+		/* MIE identification, checked by the game: part number + notice, split 28 + 20 bytes */
+		static const char id[48] = "315-6149    COPYRIGHT SEGA ENTERPRISES CO,LTD.  ";
+		hdr_code(&o, 0x83, 7); memcpy(o.p + o.n, id, 28); o.n += 28;
+		hdr_code(&o, 0x83, 5); memcpy(o.p + o.n, id + 28, 20); o.n += 20;
+		LOG("mie: get id\n");
+		return o.n;
+	}
+	/* 0x80: Z80 firmware upload, 24 (or 28) bytes per transfer. The firmware is not
+	 * executed: our MIE behaves like the stock one. Each chunk is acknowledged with
+	 * the 8-bit sum of its first 28 bytes, which the game verifies. */
+	if (inlen >= 2 && in[1] == 0xFF) {           /* end of upload */
+		hotd2_fw = 1;
+		memset(repeat_req, 0, sizeof(repeat_req));
+		o8(&o, 0x07); o8(&o, 0); o8(&o, 0x20); o8(&o, 0);
+		return o.n;
+	}
+	u8 sum = 0;
+	for (u32 k = 0; k < 0x1C && k < inlen; k++)
+		sum += in[k];
+	o8(&o, 0x80); o8(&o, 0); o8(&o, 0x20); o8(&o, 1);
+	o32(&o, sum);
+	o8(&o, 0x07); o8(&o, 0); o8(&o, 0x20); o8(&o, 0);
+	LOG("mie: firmware chunk %02x%02x sum %02x\n", inlen > 3 ? in[2] : 0, inlen > 3 ? in[3] : 0, sum);
+	return o.n;
+}
+
 /* ---------------- Maple DMA ---------------- */
 
 void maple_dma(u32 list)
@@ -313,6 +375,8 @@ void maple_dma(u32 list)
 		u32 outlen = 0;
 		if (port == 0 && dst == 0x20 && cmd == 0x86) {
 			outlen = mie_86(in, inlen, out);
+		} else if (port == 0 && dst == 0x20 && (cmd == 0x80 || cmd == 0x82)) {
+			outlen = mie_firmware_or_id(cmd, in, inlen, out);
 		} else if (port == 0 && dst == 0x20) {
 			/* standard Maple commands to the MIE: header has sender/recipient swapped */
 			u8 src = (u8)(frame >> 16), code = 0;
@@ -335,8 +399,15 @@ void maple_dma(u32 list)
 			memcpy(out, &none, 4);
 			outlen = 4;
 		}
+		if (jvs_log) {
+			fprintf(stderr, "maple IN:");
+			for (u32 k = 0; k < 4 + inlen; k++) fprintf(stderr, " %02x", k < 4 ? (u8)(frame >> (8 * k)) : in[k - 4]);
+			fprintf(stderr, "\nmaple OUT:");
+			for (u32 k = 0; k < outlen; k++) fprintf(stderr, " %02x", out[k]);
+			fprintf(stderr, "  -> %08x\n", resp);
+		}
 		for (u32 k = 0; k < outlen; k++)
-			wr8(0x0C000000u | resp, out[k]);
+			wr8((0x0C000000u | resp) + k, out[k]);
 		list += 8 + words * 4;
 		if (last) break;
 	}
