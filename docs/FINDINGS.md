@@ -239,3 +239,18 @@ stop, and dumps RAM at chosen frames (`HOTD2_DUMP_FRAMES`).
 - Harness: `HOTD2_WAV=out.wav`, `HOTD2_ARM_IPS`, and AICA register dumps;
   `tools/aicacmp.py` compares active voices between two register dumps;
   `tools/armdis.py` disassembles the driver.
+
+### Recompiler cross-check (runtime/diff.c)
+
+- Whole-run comparison (`HOTD2_INTERP_ALL=1` vs recompiled, display-list CRCs via
+  `HOTD2_LISTCRC`) is not useful as a test: the interpreter ticks per instruction
+  and the recompiled code per block, so interrupts land at different points and
+  the runs drift apart by render 26 (a few extra glyphs in one frame), harmlessly.
+- Per-function check instead: build with `HOTD2_CFLAGS=-DHOTD2_DIFF` (separate
+  build dir). Each function's first 3 calls run interpreted and recompiled from the
+  same snapshot (registers + 32 MB RAM), events held off, callees recompiled in
+  both, and the results are compared. Trials that touch MMIO, coroutines, or run
+  past 20M cycles are abandoned (function marked untestable).
+- Result over 6000 frames of scripted play (attract, coin, start, shooting):
+  2093 checks of 828 functions, **0 differences**, 370 functions untestable
+  (hardware or task-switching code). A planted register corruption is reported.

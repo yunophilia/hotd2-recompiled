@@ -5,6 +5,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include "coro.h"
+#ifdef HOTD2_DIFF
+extern int diff_trial;
+extern jmp_buf diff_abort;
+#define DIFF_GUARD() do { if (diff_trial) longjmp(diff_abort, 1); } while (0)
+#else
+#define DIFF_GUARD() do {} while (0)
+#endif
 
 #ifdef __EMSCRIPTEN__
 #define MAX_CTX 256
@@ -27,6 +34,7 @@ static Ctx *lookup(u32 buf, int create)
 
 jmp_buf *coro_bind(u32 buf)
 {
+	DIFF_GUARD();
 	Ctx *x = lookup(buf, 1);
 	if (!x) { fprintf(stderr, "coro: too many contexts\n"); abort(); }
 	x->bound = 1;
@@ -35,6 +43,7 @@ jmp_buf *coro_bind(u32 buf)
 
 void coro_restore(Sh4 *c, u32 buf)
 {
+	DIFF_GUARD();
 	(void)c;
 	Ctx *x = lookup(buf, 0);
 	if (x && x->bound)
@@ -86,6 +95,7 @@ static Ctx *lookup(u32 buf, int create)
 
 jmp_buf *coro_bind(u32 buf)
 {
+	DIFF_GUARD();
 	Ctx *x = lookup(buf, 1);
 	x->owner = current;
 	x->bound = 1;
@@ -116,6 +126,7 @@ static void switch_to(Fiber *to)
 
 void coro_restore(Sh4 *c, u32 buf)
 {
+	DIFF_GUARD();
 	Ctx *x = lookup(buf, 0);
 	if (x && x->bound && x->owner == current)
 		longjmp(x->jb, 1);                 /* same fiber: plain longjmp down the stack */

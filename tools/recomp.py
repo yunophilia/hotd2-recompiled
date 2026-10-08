@@ -407,6 +407,8 @@ class Gen:
         if pcs and pcs[0] != f:
             # the body reaches code below the entry point: start at the entry, not the lowest address
             out.insert(0, f"\tgoto L_{f:08x};")
+        if f not in (CORO_SAVE, CORO_RESTORE):
+            out.insert(0, f"	DIFF_ENTER(c, {hx(f)}, f_{f:08x});")
         if f == CORO_RESTORE:
             # keep the original register reload, then switch fibers natively (never returns)
             return (f"static void f_{f:08x}_load(Sh4 *c)\n{{\n" + "\n".join(out) + "\n}\n"

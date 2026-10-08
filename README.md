@@ -62,7 +62,10 @@ dev server can also serve it from `HOTD2_ROM_DIR` (default `C:\RetroBat\roms\nao
 `HOTD2_TRACE=0` (fast, no tracing) · `HOTD2_FRAMES=n` · `HOTD2_INTERP=1`
 (interpret unknown code instead of stopping) · `HOTD2_INPUT="1300:coin,1330:start,…"` ·
 `HOTD2_SHOTS=render numbers` (software-rendered frames as PPM) · `HOTD2_WAV=out.wav` ·
-`HOTD2_DUMP_FRAMES=…` (RAM and AICA register dumps) · `HOTD2_REGION=0|1|2`.
+`HOTD2_DUMP_FRAMES=…` (RAM and AICA register dumps) · `HOTD2_REGION=0|1|2` ·
+`HOTD2_LISTCRC=file` / `HOTD2_LISTDUMP=renders` (display-list CRCs / raw lists) ·
+`HOTD2_INTERP_ALL=1` (interpret everything). Build with `HOTD2_CFLAGS=-DHOTD2_DIFF`
+for the per-function recompiler-vs-interpreter check (`runtime/diff.c`).
 
 ## Reference emulator
 

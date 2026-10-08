@@ -109,6 +109,15 @@ static inline void sr_set(Sh4 *c, u32 v)
 /* Time and interrupts: generated code calls TICK before every branch, call and return. */
 extern u64 hle_next_event;
 void hle_event(Sh4 *c);
+/* -DHOTD2_DIFF: every recompiled function is checked against the interpreter
+ * on its first calls (runtime/diff.c) */
+#ifdef HOTD2_DIFF
+int diff_enter(Sh4 *c, u32 addr, void (*fn)(Sh4 *));
+#define DIFF_ENTER(c, a, f) do { if (diff_enter(c, a, f)) return; } while (0)
+#else
+#define DIFF_ENTER(c, a, f) do {} while (0)
+#endif
+
 #define TICK(c, n) do { (c)->cycles += (n); if ((c)->cycles >= hle_next_event) hle_event(c); } while (0)
 
 static inline void fpscr_set(Sh4 *c, u32 v)

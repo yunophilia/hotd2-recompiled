@@ -14,6 +14,7 @@
 #include <unistd.h>
 #include "sh4ctx.h"
 #include "funcs.h"
+#include "coro.h"
 
 u8 *ram;
 static Sh4 cpu;
@@ -112,6 +113,25 @@ static void shot_on_render(u64 render, const u8 *list, u32 len)
 {
 	extern void pvr_render_soft(const u8 *list, u32 len, u8 *rgba);
 	static u8 rgba[640 * 480 * 4];
+	/* HOTD2_LISTCRC=file: one line per render with the display list's length and CRC */
+	static FILE *crcf;
+	static int crc_checked;
+	if (!crc_checked) { crc_checked = 1; if (getenv("HOTD2_LISTCRC")) crcf = fopen(getenv("HOTD2_LISTCRC"), "w"); }
+	if (crcf) {
+		u32 crc = 0xFFFFFFFFu;
+		for (u32 i = 0; i < len; i++) {
+			crc ^= list[i];
+			for (int b = 0; b < 8; b++) crc = (crc >> 1) ^ (0xEDB88320u & -(crc & 1));
+		}
+		fprintf(crcf, "%llu %u %08X\n", (unsigned long long)render, len, ~crc);
+		fflush(crcf);
+	}
+	if (listed(getenv("HOTD2_LISTDUMP"), render)) {
+		char name[64];
+		snprintf(name, sizeof name, "list_%llu.bin", (unsigned long long)render);
+		FILE *f = fopen(name, "wb");
+		if (f) { fwrite(list, 1, len, f); fclose(f); }
+	}
 	if (!listed(getenv("HOTD2_SHOTS"), render)) return;
 	pvr_render_soft(list, len, rgba);
 	char name[64];
@@ -242,6 +262,10 @@ static void print_irq_state(void)
 static void stop(const char *why)
 {
 	fprintf(stderr, "stop: %s (hw accesses: %lu)\n", why, hw_count);
+#ifdef HOTD2_DIFF
+	void diff_summary(void);
+	diff_summary();
+#endif
 	FILE *dump = fopen("ram_stop.bin", "wb");   /* for comparing with Flycast's RAM dumps */
 	if (dump) { fwrite(ram, 1, RAM_SIZE, dump); fclose(dump); }
 	extern u8 aica_ram[0x800000];
@@ -304,8 +328,14 @@ void trace_lowram(u32 a, int write, int size)
 }
 #endif
 
+/* HOTD2_INTERP_ALL=1: run everything in the interpreter (except the coroutine
+ * restore, which must unwind host frames) to cross-check the recompiled code */
+static int interp_all = -1;
+
 void (*sh4_lookup(u32 target))(Sh4 *)
 {
+	if (interp_all < 0) interp_all = getenv("HOTD2_INTERP_ALL") != NULL;
+	if (interp_all && (target & 0x1FFFFFFF) != (CORO_RESTORE_ADDR & 0x1FFFFFFF)) return NULL;
 	u32 lo = 0, hi = func_count, t = target & 0x1FFFFFFF;
 	while (lo < hi) {
 		u32 mid = (lo + hi) / 2;
@@ -322,6 +352,7 @@ void sh4_dispatch(Sh4 *c, u32 target)
 {
 	void (*fn)(Sh4 *) = sh4_lookup(target);
 	if (fn) { fn(c); return; }
+	if (interp_all) { sh4_interp(c, target); return; }
 	/* record it for data/seeds.txt; with HOTD2_INTERP=1 keep going in the interpreter */
 	static u32 logged[1024];
 	static unsigned nlogged;

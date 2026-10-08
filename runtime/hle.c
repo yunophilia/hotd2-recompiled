@@ -138,6 +138,11 @@ static u32 istnrm, istext, isterr;
 #define SPG_STATUS     0x005F810Cu
 #define SH4_HZ 200000000ull
 u64 hle_next_event = 1;
+#ifdef HOTD2_DIFF
+#include <setjmp.h>
+extern int diff_trial;
+extern jmp_buf diff_abort;
+#endif
 static u32 scanline;
 u64 hle_frames;
 u64 hle_renders;
@@ -232,6 +237,9 @@ static void next_scanline(void)
 
 void hle_event(Sh4 *c)
 {
+#ifdef HOTD2_DIFF
+	if (diff_trial) longjmp(diff_abort, 1);
+#endif
 	u64 per_line = SH4_HZ / 60 / spg_lines();
 	while (c->cycles >= hle_next_event) {
 		next_scanline();
@@ -261,6 +269,9 @@ static u32 *reg_slot(u32 addr, int *known)
 
 u32 hle_read(u32 addr, int size)
 {
+#ifdef HOTD2_DIFF
+	if (diff_trial) longjmp(diff_abort, 1);
+#endif
 	u32 p = addr & 0x1FFFFFFF;
 	int known;
 	u32 v = 0;
@@ -353,6 +364,9 @@ static void g1_dma(void)
 
 void hle_write(u32 addr, u32 value, int size)
 {
+#ifdef HOTD2_DIFF
+	if (diff_trial) longjmp(diff_abort, 1);
+#endif
 	u32 p = addr & 0x1FFFFFFF;
 	int known;
 	if ((addr >> 26) == 0x38) {                 /* store-queue buffer */

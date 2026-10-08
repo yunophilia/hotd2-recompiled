@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Regenerate the recompiled C and build the native harness (run inside WSL).
 #   runtime/build-harness.sh [path/to/hotd2.zip] [build dir]
+# HOTD2_CFLAGS adds compiler flags, e.g. -DHOTD2_DIFF for the recompiler
+# cross-check (use a separate build dir: objects are reused by timestamp).
 set -euo pipefail
 here="$(cd "$(dirname "$0")/.." && pwd)"
 zip="${1:-$HOME/hotd2/roms/hotd2.zip}"
@@ -11,8 +13,8 @@ python3 -I -c "import sys; sys.path.insert(0, '$here/tools'); sys.argv = ['recom
 [ -f "$out/cart.bin" ] || python3 -I "$here/tools/cart.py" "$zip" "$out/cart.bin"
 cd "$out"
 srcs=("$out"/gen/*.c "$here"/runtime/harness.c "$here"/runtime/hle.c "$here"/runtime/jvs.c
-      "$here"/runtime/cart.c "$here"/runtime/ta.c "$here"/runtime/coro.c "$here"/runtime/pvr.c "$here"/runtime/glframe.c "$here"/runtime/interp.c "$here"/runtime/aica.c "$here"/runtime/arm7.c)
+      "$here"/runtime/cart.c "$here"/runtime/ta.c "$here"/runtime/coro.c "$here"/runtime/pvr.c "$here"/runtime/glframe.c "$here"/runtime/interp.c "$here"/runtime/aica.c "$here"/runtime/arm7.c "$here"/runtime/diff.c)
 mkdir -p obj
-printf '%s\n' "${srcs[@]}" | xargs -P"$(nproc)" -I{} sh -c 'o=obj/$(basename {} .c).o; [ "$o" -nt {} ] || gcc -O1 -g -w -I'"$here"'/runtime -I'"$out"'/gen -c {} -o "$o"'
+printf '%s\n' "${srcs[@]}" | xargs -P"$(nproc)" -I{} sh -c 'o=obj/$(basename {} .c).o; [ "$o" -nt {} ] || gcc -O1 -g -w ${HOTD2_CFLAGS:-} -I'"$here"'/runtime -I'"$out"'/gen -c {} -o "$o"'
 gcc obj/*.o -lm -o harness
 echo "built $out/harness"
