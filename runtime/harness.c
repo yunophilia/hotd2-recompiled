@@ -8,6 +8,7 @@
  */
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 #include <string.h>
 #include <signal.h>
 #include <unistd.h>
@@ -43,6 +44,42 @@ static void print_counts(void)
 	fprintf(stderr, "--- frames %llu, renders %llu, TA lists ended %u, YUV bytes %llu, cycles %llu ---\n",
 		(unsigned long long)hle_frames, (unsigned long long)hle_renders, ta_lists_ended,
 		(unsigned long long)ta_yuv_bytes, (unsigned long long)cpu.cycles);
+	{
+		extern struct Arm7 arm7;
+		extern u8 aica_ram[0x800000];
+		extern u32 aica_reg_read(u32 off, int size);
+		u32 *ar = (u32 *)&arm7;   /* r[0..15], cpsr, spsr */
+		u32 alive; memcpy(&alive, &aica_ram[0x5C], 4);
+		extern u64 arm7_fiqs;
+		fprintf(stderr, "--- arm7 fiqs=%llu ring:", (unsigned long long)arm7_fiqs);
+		for (int i = 0; i < 8; i++) { u32 w; memcpy(&w, &aica_ram[0x400 + 4 * i], 4); fprintf(stderr, " %08X", w); }
+		fprintf(stderr, " | 0x40..0x7C:");
+		for (int i = 0; i < 16; i++) { u32 w; memcpy(&w, &aica_ram[0x40 + 4 * i], 4); fprintf(stderr, " %08X", w); }
+		fprintf(stderr, "\n");
+		fprintf(stderr, "--- aica SCILV0=%X SCILV1=%X SCILV2=%X level=%X TIMB=%X ---\n",
+			aica_reg_read(0x28A8, 4), aica_reg_read(0x28AC, 4), aica_reg_read(0x28B0, 4),
+			aica_reg_read(0x2D00, 4), aica_reg_read(0x2894, 4));
+		extern double aica_dbg_sumsq[64], aica_dbg_gain[64];
+		extern u64 aica_dbg_n[64];
+		fprintf(stderr, "--- aica voices (ch: samples, rms before gain, mean gain):");
+		for (int c = 0; c < 64; c++)
+			if (aica_dbg_n[c])
+				fprintf(stderr, " %d:%llu/%.0f/%.4f", c, (unsigned long long)aica_dbg_n[c],
+					sqrt(aica_dbg_sumsq[c] / aica_dbg_n[c]), aica_dbg_gain[c] / aica_dbg_n[c]);
+		fprintf(stderr, "\n");
+		extern u32 arm_reg_reads[0x4000], arm_reg_writes[0x4000];
+		fprintf(stderr, "--- arm7 register accesses (offset:reads/writes):");
+		for (int i = 0; i < 0x4000; i++)
+			if (arm_reg_reads[i] || arm_reg_writes[i])
+				fprintf(stderr, " %04X:%u/%u", i * 4, arm_reg_reads[i], arm_reg_writes[i]);
+		fprintf(stderr, "\n");
+		extern u32 arm_watch[512];
+		fprintf(stderr, "--- arm7 reads of low sound RAM (addr:count):");
+		for (int i = 0; i < 512; i++) if (arm_watch[i]) fprintf(stderr, " %03X:%u", i * 4, arm_watch[i]);
+		fprintf(stderr, "\n");
+		fprintf(stderr, "--- arm7 pc=%08X lr=%08X sp=%08X cpsr=%08X alive[0x5C]=%08X ARMRST=%X SCIEB=%X SCIPD=%X ---\n",
+			ar[15], ar[14], ar[13], ar[16], alive, aica_reg_read(0x2C00, 4), aica_reg_read(0x289C, 4), aica_reg_read(0x28A0, 4));
+	}
 	extern u32 coro_switches, coro_fibers, sound_cmd_count;
 	fprintf(stderr, "--- task fibers %u, task switches %u, sound commands %u ---\n",
 		coro_fibers, coro_switches, sound_cmd_count);
@@ -122,11 +159,46 @@ static void scripted_input(u64 frame)
 	}
 }
 
+/* HOTD2_WAV=file.wav: append the AICA output every frame (header fixed up at exit) */
+#include "aica.h"
+static FILE *wav;
+static u32 wav_frames, wav_read;
+
+static void wav_finish(void)
+{
+	if (!wav) return;
+	u32 data = wav_frames * 4;
+	u8 h[44];
+	memcpy(h, "RIFF", 4); u32 v = 36 + data; memcpy(h + 4, &v, 4); memcpy(h + 8, "WAVEfmt ", 8);
+	v = 16; memcpy(h + 16, &v, 4); u16 s = 1; memcpy(h + 20, &s, 2); s = 2; memcpy(h + 22, &s, 2);
+	v = AICA_RATE; memcpy(h + 24, &v, 4); v = AICA_RATE * 4; memcpy(h + 28, &v, 4);
+	s = 4; memcpy(h + 32, &s, 2); s = 16; memcpy(h + 34, &s, 2); memcpy(h + 36, "data", 4); memcpy(h + 40, &data, 4);
+	fseek(wav, 0, SEEK_SET); fwrite(h, 1, 44, wav); fclose(wav); wav = NULL;
+}
+
+static void wav_pump(void)
+{
+	if (!wav) {
+		if (!getenv("HOTD2_WAV")) return;
+		wav = fopen(getenv("HOTD2_WAV"), "wb");
+		if (!wav) return;
+		static u8 zero[44];
+		fwrite(zero, 1, 44, wav);
+		atexit(wav_finish);
+	}
+	u32 w = aica_ring_write;
+	while (wav_read != w) {
+		fwrite(&aica_ring[(wav_read % AICA_RING) * 2], 2, 2, wav);
+		wav_read++; wav_frames++;
+	}
+}
+
 static void dump_on_frame(u64 frame)
 {
 	if (frame_limit && frame >= frame_limit)
 		stop("frame limit reached");
 	scripted_input(frame);
+	wav_pump();
 	static const char *spec;
 	if (!spec && !(spec = getenv("HOTD2_DUMP_FRAMES"))) spec = "";
 	for (const char *p = spec; *p; ) {
@@ -135,6 +207,10 @@ static void dump_on_frame(u64 frame)
 			snprintf(name, sizeof name, "hram_%llu.bin", (unsigned long long)frame);
 			FILE *f = fopen(name, "wb");
 			if (f) { fwrite(ram, 1, RAM_SIZE, f); fclose(f); }
+			extern u16 aica_regs16[0x8000];
+			snprintf(name, sizeof name, "haregs_%llu.bin", (unsigned long long)frame);
+			f = fopen(name, "wb");
+			if (f) { fwrite(aica_regs16, 2, 0x4000, f); fclose(f); }   /* first 0x8000 bytes, like Flycast */
 		}
 		const char *comma = strchr(p, ',');
 		if (!comma) break;
@@ -168,6 +244,9 @@ static void stop(const char *why)
 	fprintf(stderr, "stop: %s (hw accesses: %lu)\n", why, hw_count);
 	FILE *dump = fopen("ram_stop.bin", "wb");   /* for comparing with Flycast's RAM dumps */
 	if (dump) { fwrite(ram, 1, RAM_SIZE, dump); fclose(dump); }
+	extern u8 aica_ram[0x800000];
+	dump = fopen("aram_stop.bin", "wb");
+	if (dump) { fwrite(aica_ram, 1, 0x800000, dump); fclose(dump); }
 	print_counts();
 	print_irq_state();
 	extern void ta_debug(void);
@@ -290,6 +369,8 @@ int main(int argc, char **argv)
 	cpu.r[15] = 0x0CA553C0u;
 	if (getenv("HW_BUDGET"))
 		MAX_HW = strtoul(getenv("HW_BUDGET"), NULL, 0);
+	extern int arm_per_sample;
+	if (getenv("HOTD2_ARM_IPS")) arm_per_sample = atoi(getenv("HOTD2_ARM_IPS"));
 	extern u32 hle_region;
 	if (getenv("HOTD2_REGION"))
 		hle_region = (u32)strtoul(getenv("HOTD2_REGION"), NULL, 0);

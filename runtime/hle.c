@@ -11,6 +11,7 @@
 #include "cart.h"
 #include "ta.h"
 #include "glframe.h"
+#include "aica.h"
 
 void (*hle_trace)(const char *kind, u32 addr, u32 value, int size);
 static Sh4 *hle_cpu;
@@ -236,6 +237,7 @@ void hle_event(Sh4 *c)
 		next_scanline();
 		hle_next_event += per_line;
 	}
+	aica_advance(c->cycles);
 	u32 level = holly_level();
 	u32 imask = (sr_get(c) >> 4) & 0xF;
 	if (level && level > imask && !(c->sr_rest & SR_BL))
@@ -278,7 +280,7 @@ u32 hle_read(u32 addr, int size)
 		return v;
 	}
 	if (p >= 0x00700000u && p < 0x00710000u) {
-		v = aica_regs[(p & 0xFFFF) / 4];
+		v = aica_enabled ? aica_reg_read(p, size) : aica_regs[(p & 0xFFFF) / 4];
 		if (hle_trace) hle_trace("R", addr, v, size);
 		return size == 4 ? v : size == 2 ? (v & 0xFFFF) : (v & 0xFF);
 	}
@@ -366,7 +368,7 @@ void hle_write(u32 addr, u32 value, int size)
 	 * zeroing it. Record the command and free the slot at once. */
 	if (p >= 0x00800400u && p < 0x00800500u && size == 4 && value) {
 		sound_cmds[sound_cmd_count++ % 256] = value;
-		value = 0;
+		if (!aica_enabled) value = 0;          /* the emulated driver consumes it itself */
 	}
 	u8 *vp = vram_ptr(p);
 	if (vp) {
@@ -377,12 +379,14 @@ void hle_write(u32 addr, u32 value, int size)
 	vp = aica_ptr(p);
 	if (vp) {
 		memcpy(vp, &value, size);
+		if (hle_trace && p < 0x00800800u) hle_trace("SW", addr, value, size);   /* driver mailbox area */
 		return;
 	}
 	if (p >= 0x005F9000u && p < 0x005FA000u)
 		glframe_palette_dirty();
 	if (hle_trace) hle_trace("W", addr, value, size);
 	if (p >= 0x00700000u && p < 0x00710000u) {
+		if (aica_enabled) { aica_reg_write(p, value, size); return; }
 		u32 *r = &aica_regs[(p & 0xFFFF) / 4];
 		/* STUB until the ARM7 sound CPU is emulated: when the game releases it from
 		 * reset, pretend the uploaded driver started and posted its "alive" word at

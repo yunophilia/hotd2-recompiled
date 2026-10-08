@@ -215,3 +215,27 @@ stop, and dumps RAM at chosen frames (`HOTD2_DUMP_FRAMES`).
   browser: steady 60 game fps and 60 renders/s in attract mode.
 - Coroutines in the browser support same-stack longjmp only; a true stack switch
   aborts with a message (not needed so far).
+
+### Sound (2026-10-08)
+
+- `runtime/arm7.c`: ARM7 interpreter (ARM state: data processing with the full
+  barrel shifter, multiplies, single/halfword/block transfers, SWP, MRS/MSR,
+  SWI, FIQ). Bug found on the way: for loads/stores bit 25 means *register*
+  offset, the opposite of data processing.
+- `runtime/aica.c`: AICA registers shared by SH-4 (0x00700000) and ARM
+  (0x00800000), ARM reset, timers A/B/C, ARM interrupt controller (levels via
+  SCILV0-2, request 0x2D00, accept 0x2D04), channel monitor (0x2810: LP, SGC,
+  EG = 0x1FFF once silent; 0x2814: CA), 64 voices (PCM16/PCM8/Yamaha ADPCM),
+  envelope with the chip's rate tables, pitch OCT/FNS, TL/DISDL/DIPAN in
+  0.375 dB units, output = sample * 2^(-att/16), master volume.
+- The game's own sound driver now runs on the emulated ARM: it answers the boot
+  handshake, consumes the command ring at sound RAM 0x400 (byte-indexed via the
+  read index at 0x44), and plays music/effects. Both earlier stubs are gone when
+  the AICA is enabled.
+- Compared with Flycast's output (`tools/audiocmp.py`, Flycast patched to dump
+  raw PCM): sound starts at the same time, peaks within a few percent, RMS
+  20-40% high early and up to about 2x later (no low-pass filter,
+  interpolation or effects DSP yet).
+- Harness: `HOTD2_WAV=out.wav`, `HOTD2_ARM_IPS`, and AICA register dumps;
+  `tools/aicacmp.py` compares active voices between two register dumps;
+  `tools/armdis.py` disassembles the driver.
