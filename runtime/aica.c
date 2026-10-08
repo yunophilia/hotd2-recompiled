@@ -60,7 +60,7 @@ typedef struct {
 	int adpcm_sample, adpcm_step;
 	int loop_sample, loop_step, loop_saved;
 	int lp;              /* loop end reached (monitor flag) */
-	int last;            /* last decoded sample (for the mixer) */
+	int last, prev;      /* the two most recent decoded samples (interpolated by frac) */
 } Chan;
 
 static Chan ch[64];
@@ -86,6 +86,7 @@ static void key_on(int c)
 	k->adpcm_step = 127;
 	k->loop_saved = 0;
 	k->lp = 0;
+	k->last = k->prev = 0;
 }
 
 static void key_off(int c)
@@ -201,11 +202,11 @@ static void voice(int c, Chan *k, int *out_l, int *out_r)
 	u64 adv = (u64)k->frac + (u64)(inc * (1 << 22));
 	u32 steps = (u32)(adv >> 22);
 	k->frac = (u32)(adv & ((1u << 22) - 1));
-	if (steps == 0 && k->pos == 0 && pcms >= 2 && !k->loop_saved) steps = 0;
 	for (u32 i = 0; i < steps; i++) {
 		if (pcms >= 2 && k->pos == lsa && !k->loop_saved) {
 			k->loop_sample = k->adpcm_sample; k->loop_step = k->adpcm_step; k->loop_saved = 1;
 		}
+		k->prev = s;
 		s = fetch(c, k, k->pos);
 		k->pos++;
 		if (k->pos >= lea && lea) {
@@ -223,8 +224,10 @@ static void voice(int c, Chan *k, int *out_l, int *out_r)
 			}
 		}
 	}
-	if (steps == 0 && pcms < 2) s = fetch(c, k, k->pos);
 	k->last = s;
+	/* linear interpolation between the last two samples by the position fraction
+	 * (one sample behind the true position, which keeps ADPCM decoding in order) */
+	s = k->prev + (int)(((s64)(s - k->prev) * k->frac) >> 22);
 	/* Attenuation in 0.375 dB units: TL + envelope (10-bit EG / 4) + direct send level
 	 * (DISDL: 3 dB per step, 0 = mute) + pan on one side (DIPAN: 3 dB per step,
 	 * 15 = mute). 255 or more is silent. Output = sample * 2^(-att/16). */

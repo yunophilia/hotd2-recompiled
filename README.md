@@ -21,11 +21,15 @@ contains no game code or data, only tools and our own runtime.
 - [x] **Graphics**: PVR2 display-list and texture decoder (`runtime/pvr.c`) with
   a reference software rasteriser, and a **WebGL2 renderer** in the browser.
 - [x] **Sound**: ARM7 interpreter + AICA model run the game's own sound driver;
-  output via AudioWorklet in the browser. No effects DSP or per-voice filter yet.
+  output via AudioWorklet in the browser, with sample interpolation. (HOTD2 leaves
+  the per-voice filter and effects DSP unused, so they are not emulated.)
 - [x] **Browser build**: 60 fps attract mode and gameplay, mouse/touch gun,
   keyboard coin/start/test (`web/play/`).
-- [ ] Wider coverage of late-game code paths, filter/DSP for sound, saving
-  EEPROM/SRAM in the browser, then step-by-step decompilation into readable C.
+- [x] **Saves**: EEPROM and SRAM persist in the browser (localStorage).
+- [x] **Recompiler cross-check**: per-function comparison against the interpreter
+  (`runtime/diff.c`), 828 functions checked, no differences.
+- [ ] Wider coverage of late-game code paths, then step-by-step decompilation
+  into readable C.
 
 See `docs/FINDINGS.md` for everything learned about the hardware and the game.
 

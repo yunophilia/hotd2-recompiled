@@ -254,3 +254,14 @@ stop, and dumps RAM at chosen frames (`HOTD2_DUMP_FRAMES`).
 - Result over 6000 frames of scripted play (attract, coin, start, shooting):
   2093 checks of 828 functions, **0 differences**, 370 functions untestable
   (hardware or task-switching code). A planted register corruption is reported.
+
+### AICA: filter, DSP, interpolation
+
+- Flycast's AICA register dumps (attract, frames 540–660): every keyed-on voice has
+  LPOFF=1 (filter bypassed), IMXL=0 (no DSP send) and the DSP program (MPRO) is
+  empty. HOTD2 does not use the per-voice filter or effects DSP there, so neither
+  is emulated.
+- Linear interpolation between the last two decoded samples (one sample behind,
+  so ADPCM decoding stays sequential) brings the 16–22 kHz band from −23.7 dB to
+  −30.2 dB of total energy, the same as Flycast's output (8–23 s window). Overall
+  RMS is still ~22% above Flycast's.
