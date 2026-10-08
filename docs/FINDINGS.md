@@ -43,6 +43,26 @@ Approximate, at 64 KB granularity:
 - Still changing: most of `0x0D0C0000–0x0D980000` (heap and working buffers).
 - Above `0x0D980000`: unused.
 
+## Hardware access (`tools/hwrefs.py`)
+
+Counted from each function's 32-bit PC-relative literals, so these are lower bounds:
+
+| Block | Functions | Notes |
+|---|---|---|
+| SH-4 on-chip regs | 134 | timers, DMAC, cache control, CCN |
+| VRAM (64-bit path) | 65 | some may be float constants that happen to look like addresses |
+| TA FIFO | 55 | display-list writers, spread across game code |
+| AICA RAM | 35 | sound driver upload and sound commands |
+| Holly system bus | 11 | all in `0x0C0B2630–0x0C0DBDC2` |
+| store queues | 9 | `0x0C0B4920–0x0C0D324A`, fast TA/texture transfer |
+| PVR regs | 8 | mostly `0x0C0D7D10–0x0C0D89BA` |
+| G1 / NAOMI cart | 6 / 2 | `0x0C0B2180–0x0C0C0228`, ROM PIO/DMA reads |
+
+So the low-level hardware layer is concentrated in **`0x0C0B0000–0x0C0E0000`**,
+which looks like the Sega SDK libraries (Kamui/Ninja-style). That is the obvious
+seam for HLE: replace those functions wholesale and leave the game code
+above them recompiled.
+
 ## Not yet known
 
 - Where the PVR2 Tile Accelerator display lists are built and submitted.
