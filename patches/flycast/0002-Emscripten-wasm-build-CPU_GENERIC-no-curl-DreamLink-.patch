@@ -1,0 +1,142 @@
+From 421e59dc934adb367367cbaef2303b2e71e4f0fd Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ivan=20H=2E=20=F0=9F=8F=B3=EF=B8=8F=E2=80=8D=F0=9F=8C=88?=
+ =?UTF-8?q?=F0=9F=8F=B3=EF=B8=8F=E2=80=8D=E2=9A=A7=EF=B8=8F?=
+ <ivankun16.5@gmail.com>
+Date: Wed, 7 Oct 2026 21:21:53 -0700
+Subject: [PATCH 2/2] Emscripten/wasm build: CPU_GENERIC, no curl/DreamLink,
+ SDL2 port, pthread link flags
+
+---
+ CMakeLists.txt                | 21 ++++++++++++++++++---
+ core/build.h                  |  4 ++++
+ core/hw/sh4/sh4_core_regs.cpp |  2 ++
+ core/linux/context.cpp        |  2 ++
+ core/oslib/http_client.cpp    | 11 ++++++++++-
+ 5 files changed, 36 insertions(+), 4 deletions(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index c5ac6f6..a3ff648 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -61,6 +61,9 @@ else()
+ endif()
+ 
+ include(DetectArchitecture)
++if(EMSCRIPTEN)
++	set(ARCHITECTURE "wasm32")
++endif()
+ if(NOT DEFINED ARCHITECTURE)
+ 	message(FATAL_ERROR "Unsupported architecture encountered. Ending CMake generation.")
+ endif()
+@@ -495,7 +498,7 @@ if(NOT LIBRETRO)
+ 	endif()
+ 
+ 	if(NOT ANDROID AND NOT IOS)
+-		if (NOT NINTENDO_SWITCH)
++		if (NOT NINTENDO_SWITCH AND NOT EMSCRIPTEN)
+ 			# DreamLink enabled for non-mobile Linux, MacOS, and Windows
+ 			target_compile_definitions(${PROJECT_NAME} PRIVATE USE_DREAMLINK_DEVICES=1)
+ 			set(USE_DREAMLINK_DEVICES ON) # Must be set before adding core/sdl
+@@ -528,7 +531,19 @@ if(NOT LIBRETRO)
+ 			target_link_libraries(${PROJECT_NAME} PRIVATE dream_pico_port_api)
+ 		endif()
+ 
+-		if(USE_HOST_SDL)
++		if(EMSCRIPTEN)
++			target_compile_options(${PROJECT_NAME} PRIVATE -sUSE_SDL=2)
++			target_link_options(${PROJECT_NAME} PRIVATE -sUSE_SDL=2)
++			# Browser build: main() runs blocking on a worker, rendering via OffscreenCanvas.
++			# The page writes the ROM/BIOS into MEMFS, then calls callMain().
++			target_link_options(${PROJECT_NAME} PRIVATE
++				-sPROXY_TO_PTHREAD -sOFFSCREENCANVAS_SUPPORT
++				-sMAX_WEBGL_VERSION=2 -sMIN_WEBGL_VERSION=2 -sFULL_ES3
++				-sALLOW_MEMORY_GROWTH -sINITIAL_MEMORY=512MB -sMAXIMUM_MEMORY=2GB -sSTACK_SIZE=4MB
++				-sPTHREAD_POOL_SIZE=8 -sFORCE_FILESYSTEM -sINVOKE_RUN=0 -sEXIT_RUNTIME=0
++				-sEXPORTED_RUNTIME_METHODS=FS,callMain -sENVIRONMENT=web,worker)
++			set(SDL2_FOUND 1)
++		elseif(USE_HOST_SDL)
+ 			find_package(SDL2 2.0.18)
+ 		endif()
+ 		if(NOT SDL2_FOUND)
+@@ -555,7 +570,7 @@ if(NOT LIBRETRO)
+ 		target_compile_definitions(${PROJECT_NAME} PRIVATE USE_SDL USE_SDL_AUDIO)
+ 		add_subdirectory(core/sdl)
+ 
+-		if((UNIX AND NOT APPLE) OR NINTENDO_SWITCH)
++		if(((UNIX AND NOT APPLE) OR NINTENDO_SWITCH) AND NOT EMSCRIPTEN)
+ 			find_package(CURL REQUIRED)
+ 			target_link_libraries(${PROJECT_NAME} PRIVATE CURL::libcurl)
+ 		endif()
+diff --git a/core/build.h b/core/build.h
+index 6ea5355..90bbb8a 100755
+--- a/core/build.h
++++ b/core/build.h
+@@ -17,6 +17,7 @@
+ #define CPU_ARM      0x20000002
+ #define CPU_ARM64    0x20000003
+ #define CPU_X64      0x20000004
++#define CPU_GENERIC  0x20000005
+ 
+ //FEAT_SHREC, FEAT_AREC, FEAT_DSPREC
+ #define DYNAREC_NONE	0x40000001
+@@ -32,6 +33,9 @@
+ 	#define HOST_CPU CPU_ARM
+ #elif defined(__aarch64__) || defined(_M_ARM64)
+ 	#define HOST_CPU CPU_ARM64
++#elif defined(__EMSCRIPTEN__) || defined(__wasm__)
++	#define HOST_CPU CPU_GENERIC
++	#define TARGET_NO_REC
+ #else
+ 	#error Unsupported architecture
+ #endif
+diff --git a/core/hw/sh4/sh4_core_regs.cpp b/core/hw/sh4/sh4_core_regs.cpp
+index 88c1405..ebe654b 100644
+--- a/core/hw/sh4/sh4_core_regs.cpp
++++ b/core/hw/sh4/sh4_core_regs.cpp
+@@ -120,6 +120,8 @@ static void setHostRoundingMode(u32 roundingMode, u32 denorm2zero)
+                 : "r"(off_mask), "r"(on_mask)
+ 				: "x10"
+             );
++    #elif HOST_CPU == CPU_GENERIC
++	// wasm: no access to FP control; rounding stays nearest, denormals preserved
+     #else
+ 	#error "SetFloatStatusReg: Unsupported platform"
+     #endif
+diff --git a/core/linux/context.cpp b/core/linux/context.cpp
+index 461ff26..15af7da 100644
+--- a/core/linux/context.cpp
++++ b/core/linux/context.cpp
+@@ -130,6 +130,8 @@ static void context_segfault(host_context_t* hostctx, void* segfault_ctx)
+     #else
+         #error "Unsupported OS"
+ 	#endif
++#elif HOST_CPU == CPU_GENERIC
++	// wasm: no signal-based fault handling
+ #else
+ 	#error Unsupported HOST_CPU
+ #endif
+diff --git a/core/oslib/http_client.cpp b/core/oslib/http_client.cpp
+index 6a25059..0140363 100644
+--- a/core/oslib/http_client.cpp
++++ b/core/oslib/http_client.cpp
+@@ -39,7 +39,16 @@ int get(const std::string& url, std::vector<u8>& content, std::string& contentTy
+ 
+ }
+ 
+-#if !defined(__ANDROID__) && !defined(__APPLE__)
++#if defined(__EMSCRIPTEN__)
++namespace http {
++// The browser build has no outbound HTTP: these report failure.
++void init() {}
++void term() {}
++int get(const std::string&, std::vector<u8>&, const Headers *, Headers *) { return 500; }
++int post(const std::string&, const std::vector<PostField>&) { return 500; }
++int post(const std::string&, const char *, const char *, std::vector<u8>&) { return 500; }
++}
++#elif !defined(__ANDROID__) && !defined(__APPLE__)
+ 
+ #ifdef _WIN32
+ #ifndef TARGET_UWP
+-- 
+2.53.0
+
