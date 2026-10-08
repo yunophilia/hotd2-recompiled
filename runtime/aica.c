@@ -1,6 +1,7 @@
 /* AICA sound chip model, see aica.h. Written from the AICA register layout:
  * 64 channels x 0x80 bytes of 16-bit registers, common registers from 0x2800,
  * ARM interrupt controller at 0x289C-0x28B0 and 0x2D00/0x2D04, ARM reset at 0x2C00. */
+#include <stdio.h>
 #include <math.h>
 #include <string.h>
 #include "aica.h"
@@ -405,4 +406,13 @@ void aica_advance(u64 sh4_cycles)
 		one_sample();
 		sample_acc -= 1.0;
 	}
+}
+
+/* debug: one line per sounding voice (harness, at HOTD2_DUMP_FRAMES) */
+void aica_debug_voices(FILE *f)
+{
+	for (int c = 0; c < 64; c++)
+		if (ch[c].on)
+			fprintf(f, "  voice %2d pos %5u/%04X eg %4d state %d SA %06X\n", c, ch[c].pos, CR(c, 0x0C),
+			        ch[c].eg, ch[c].eg_state, chan_sa(c));
 }

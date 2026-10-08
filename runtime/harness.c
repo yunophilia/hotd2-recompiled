@@ -231,6 +231,9 @@ static void dump_on_frame(u64 frame)
 			snprintf(name, sizeof name, "haregs_%llu.bin", (unsigned long long)frame);
 			f = fopen(name, "wb");
 			if (f) { fwrite(aica_regs16, 2, 0x4000, f); fclose(f); }   /* first 0x8000 bytes, like Flycast */
+			void aica_debug_voices(FILE *);
+			fprintf(stderr, "--- voices at frame %llu:\n", (unsigned long long)frame);
+			aica_debug_voices(stderr);
 		}
 		const char *comma = strchr(p, ',');
 		if (!comma) break;
