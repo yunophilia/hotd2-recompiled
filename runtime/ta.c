@@ -100,6 +100,8 @@ static void ta_fifo(const u8 *data, u32 len)
 	}
 	memcpy(ta_list + ta_list_len, data, len);
 	ta_list_len += len;
+	extern void hle_ta_param_bytes(u32 n);
+	hle_ta_param_bytes(len);
 	for (u32 k = 0; k + 32 <= len; k += 32) {
 		if (skip_next) { skip_next = 0; continue; }
 		ta_param(data + k);

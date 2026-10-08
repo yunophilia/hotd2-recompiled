@@ -161,3 +161,25 @@ Tools: `tools/statediff.py` (state diff aligned by progress), `tools/tasks.py`,
 `tools/ramcmp.py`, `tools/disraw.py`, `tools/biosarea.py`; harness prints
 register histogram, IRQ state, TA parser state, fibers and sound commands at
 stop, and dumps RAM at chosen frames (`HOTD2_DUMP_FRAMES`).
+
+### Attract-mode stall (investigation state)
+
+- Main loop: `main` calls per-frame work, then dispatches on the game mode at
+  `0x0C3D07B4` (0–10). Mode 9 handler `f_0c020070` has sub-state `0x0C3D07B8`:
+  0 = set up and create the task list (head stored at `0x0C145E10`), 1 = run-task
+  (`f_0c0b8264`) every frame. Task lists match Flycast exactly.
+- Scene sequencer task `f_0c06761a` runs an attract **script** loaded from the
+  cart to `0x0CAE0000` (pointer `0x0C3D125C`, step count `0x0C3D1250`), dispatching
+  commands through the table at `0x0C13C020`. Command `0x41` (`f_0c06821e`) =
+  "wait N frames", counter at `0x0C3CFE04` advanced by `f_0c02862c`.
+- Frame pipeline: 4 slots at `0x0CA25F94` with states 0 begin → 2 lists sent →
+  3 ready → 4 rendering → 5 done → 7 free; in-flight flag `0x0CA25FBC`. Render
+  is started from the level-6 interrupt (`f_0c0d8360` → `f_0c0d80ea`,
+  STARTRENDER) when a slot is in state 3.
+- Ours: everything runs normally until frame ~1083 (render 822, script step 2,
+  wait counter 11 of 495), then the game logic stops beginning frames while the
+  main loop and interrupts keep running. Nothing external is pending at that
+  point (no cart DMA, no sound-RAM polling, TA idle). Flycast passes the same
+  point without pausing (around its frame 1210).
+- Ruled out so far: JVS replies (byte-identical), sound command ring, TA list
+  end interrupts, TA_LIST_INIT/TA_ITP_CURRENT, cart DMA addressing.

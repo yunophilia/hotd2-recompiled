@@ -146,6 +146,11 @@ void (*hle_on_frame)(u64 frame);   /* debug hook, called at every vblank-in */
 
 void hle_raise_normal(int bit) { istnrm |= 1u << bit; }
 
+/* The TA stores polygon parameters in VRAM and advances TA_ITP_CURRENT; we do not
+ * build that memory, but keep the pointer moving so usage checks see progress.
+ * Approximation: one byte of parameter memory per byte of TA input. */
+void hle_ta_param_bytes(u32 n) { pvr[(0x005F8138u - 0x005F8000u) / 4] += n; }
+
 static u32 spg_lines(void)
 {
 	u32 v = (PVR(SPG_LOAD) >> 16) & 0x3FF;
@@ -388,8 +393,12 @@ void hle_write(u32 addr, u32 value, int size)
 	}
 	if (p == 0x005F6808u && (value & 1))
 		ch2_dma();
-	if (p == 0x005F8144u && (value & 0x80000000u))   /* TA_LIST_INIT */
+	if (p == 0x005F8144u && (value & 0x80000000u)) { /* TA_LIST_INIT */
 		ta_list_reset();
+		PVR(0x005F8138u) = PVR(0x005F8128u);         /* TA_ITP_CURRENT = TA_ISP_BASE */
+		PVR(0x005F8134u) = PVR(0x005F8124u);         /* TA_NEXT_OPB = TA_OL_BASE */
+		PVR(0x005F8144u) = 0;                        /* init completes at once */
+	}
 	if (p == 0x005F8014u) {                         /* STARTRENDER: not drawn yet, report done */
 		extern u64 hle_renders;
 		hle_renders++;
