@@ -121,6 +121,12 @@ EMSCRIPTEN_KEEPALIVE void web_start(void)
 }
 
 #include "aica.h"
+/* persistent storage the page saves/restores: JVS EEPROM (128 B) and NAOMI SRAM (32 KB) */
+extern u8 naomi_sram[0x8000];
+EMSCRIPTEN_KEEPALIVE u8 *web_eeprom(void) { return naomi_eeprom; }
+EMSCRIPTEN_KEEPALIVE u32 web_eeprom_size(void) { return sizeof naomi_eeprom; }
+EMSCRIPTEN_KEEPALIVE u8 *web_sram(void) { return naomi_sram; }
+EMSCRIPTEN_KEEPALIVE u32 web_sram_size(void) { return sizeof naomi_sram; }
 /* audio ring for web/play/audio-worklet.js: AICA_RING stereo s16 frames + monotonic write count */
 EMSCRIPTEN_KEEPALIVE s16 *web_audio_ring(void) { return aica_ring; }
 EMSCRIPTEN_KEEPALIVE volatile u32 *web_audio_write(void) { return &aica_ring_write; }

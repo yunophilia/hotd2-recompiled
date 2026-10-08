@@ -33,6 +33,32 @@ s.onerror = () => log('../game/hotd2.js is missing: run runtime/build-web.sh fir
 document.body.appendChild(s);
 if (!crossOriginIsolated) log('page is not cross-origin isolated; serve it with web/serve.py');
 
+// EEPROM (settings) and SRAM (bookkeeping, scores) persist in this browser.
+const SAVE_KEY = 'hotd2-web-save-v1';
+function toB64(u8) { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode(...u8.subarray(i, i + 0x8000)); return btoa(s); }
+function fromB64(b64) { const s = atob(b64); const u8 = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u8[i] = s.charCodeAt(i); return u8; }
+function saveRegions() {
+	return [[Module._web_eeprom(), Module._web_eeprom_size(), 'eeprom'], [Module._web_sram(), Module._web_sram_size(), 'sram']];
+}
+function restoreSave() {
+	try {
+		const saved = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null');
+		if (!saved) return;
+		for (const [ptr, size, name] of saveRegions())
+			if (saved[name]) Module.HEAPU8.set(fromB64(saved[name]).subarray(0, size), ptr);
+		log('restored EEPROM/SRAM from this browser');
+	} catch (e) { log('could not restore saves: ' + e.message); }
+}
+let lastSave = '';
+function persistSave() {
+	try {
+		const out = {};
+		for (const [ptr, size, name] of saveRegions()) out[name] = toB64(Module.HEAPU8.slice(ptr, ptr + size));
+		const json = JSON.stringify(out);
+		if (json !== lastSave) { localStorage.setItem(SAVE_KEY, json); lastSave = json; }
+	} catch (e) { /* storage may be unavailable (private mode); the game still runs */ }
+}
+
 let audioCtx;
 // Must be called synchronously from a user gesture (click / file pick) so audio may start.
 function prepareAudio() {
@@ -79,8 +105,11 @@ async function start(zipBytes) {
 	}
 	Module._web_set_program(progPtr, program.length);
 	Module._web_set_cart(cartPtr, CART_SIZE);
+	restoreSave();
 	log('starting game thread');
 	Module._web_start();
+	setInterval(persistSave, 5000);
+	window.addEventListener('pagehide', persistSave);
 	startAudio();
 	run();
 }
