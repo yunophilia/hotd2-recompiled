@@ -76,3 +76,4 @@
 0C0C3912  # from pr=0C0C38EE
 0C0C3902  # from pr=0C0C38EE
 0C0C390A  # from pr=0C0C38EE
+0C094782  # browser run, attract mode

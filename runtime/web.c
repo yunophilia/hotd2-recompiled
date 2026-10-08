@@ -120,6 +120,12 @@ EMSCRIPTEN_KEEPALIVE void web_start(void)
 	pthread_create(&t, &a, game_thread, NULL);
 }
 
+#include "aica.h"
+/* audio ring for web/play/audio-worklet.js: AICA_RING stereo s16 frames + monotonic write count */
+EMSCRIPTEN_KEEPALIVE s16 *web_audio_ring(void) { return aica_ring; }
+EMSCRIPTEN_KEEPALIVE volatile u32 *web_audio_write(void) { return &aica_ring_write; }
+EMSCRIPTEN_KEEPALIVE u32 web_audio_size(void) { return AICA_RING; }
+
 u32 pvr_reg(u32 phys);
 EMSCRIPTEN_KEEPALIVE u32 web_reg(u32 phys) { return pvr_reg(phys); }
 

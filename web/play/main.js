@@ -33,6 +33,34 @@ s.onerror = () => log('../game/hotd2.js is missing: run runtime/build-web.sh fir
 document.body.appendChild(s);
 if (!crossOriginIsolated) log('page is not cross-origin isolated; serve it with web/serve.py');
 
+let audioCtx;
+// Must be called synchronously from a user gesture (click / file pick) so audio may start.
+function prepareAudio() {
+	if (audioCtx) return;
+	try { audioCtx = new AudioContext({ sampleRate: 44100 }); } catch (e) { log('no audio: ' + e.message); }
+}
+
+async function startAudio() {
+	if (!audioCtx) return;
+	try {
+		await audioCtx.audioWorklet.addModule('audio-worklet.js');
+		const node = new AudioWorkletNode(audioCtx, 'aica-player', { outputChannelCount: [2] });
+		node.port.postMessage({
+			buffer: Module.HEAPU8.buffer,
+			ring: Module._web_audio_ring(),
+			write: Module._web_audio_write(),
+			size: Module._web_audio_size(),
+		});
+		node.connect(audioCtx.destination);
+		const resume = () => audioCtx.state !== 'running' && audioCtx.resume();
+		window.addEventListener('pointerdown', resume);
+		window.addEventListener('keydown', resume);
+		resume();
+	} catch (e) {
+		log('audio failed: ' + e.message);
+	}
+}
+
 async function start(zipBytes) {
 	$('overlay').hidden = true;
 	log('reading ROM set...');
@@ -53,6 +81,7 @@ async function start(zipBytes) {
 	Module._web_set_cart(cartPtr, CART_SIZE);
 	log('starting game thread');
 	Module._web_start();
+	startAudio();
 	run();
 }
 
@@ -116,11 +145,13 @@ function setupInput(canvas) {
 
 $('rom').addEventListener('change', async (e) => {
 	const f = e.target.files[0];
+	prepareAudio();
 	if (f) start(new Uint8Array(await f.arrayBuffer())).catch((err) => log('error: ' + err.message));
 });
 if (['localhost', '127.0.0.1'].includes(location.hostname)) {
 	$('dev').hidden = false;
 	$('dev').addEventListener('click', async () => {
+		prepareAudio();
 		const r = await fetch('../local-roms/hotd2.zip');
 		start(new Uint8Array(await r.arrayBuffer())).catch((err) => log('error: ' + err.message));
 	});
