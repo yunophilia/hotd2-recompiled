@@ -2,6 +2,8 @@
 # Discover entry points the static analysis misses by playing the game natively:
 # coin + start, then shoot around. Every run that stops on an unknown target
 # appends it to data/seeds.txt and rebuilds. (run inside WSL)
+# Player 1 never runs out of lives (0x0C3D0430 held at 3) so runs reach later
+# stages; set HOTD2_FREEZE= (empty) to play fair.
 #   runtime/seed-play.sh [iterations] [frames] [build dir]
 set -uo pipefail
 here="$(cd "$(dirname "$0")/.." && pwd)"
@@ -15,11 +17,12 @@ for f in $(seq 1500 30 "$frames"); do
 	if (( f % 300 == 0 )); then script="$script,$((f+8)):reload,$((f+12)):-reload"; fi
 done
 cd "$out"
+export HOTD2_FREEZE="${HOTD2_FREEZE-0C3D0430=3@1500}"
 for i in $(seq 1 "$iters"); do
 	[ -f missing.txt ] && grep -v "^00000000" missing.txt >> "$here/data/seeds.txt"
 	rm -f missing.txt
 	bash "$here/runtime/build-harness.sh" "$HOME/hotd2/roms/hotd2.zip" "$out" 2>&1 | grep -E "rror:"
-	HOTD2_INTERP=1 HOTD2_TRACE=0 HOTD2_FRAMES="$frames" HOTD2_INPUT="$script" timeout 1200 ./harness ic22.bin > run.log 2>&1
+	HOTD2_INTERP=1 HOTD2_TRACE=0 HOTD2_FRAMES="$frames" HOTD2_INPUT="$script" timeout 3000 ./harness ic22.bin > run.log 2>&1
 	echo "iter $i: $(grep "^stop" run.log | cut -c1-40) | $(grep "^--- frames" run.log | cut -c5-60) | new targets $(cat missing.txt 2>/dev/null | wc -l)"
 	[ -f missing.txt ] || break
 	if grep -q "^00000000" missing.txt; then echo "NULL CALL:"; cat missing.txt; break; fi

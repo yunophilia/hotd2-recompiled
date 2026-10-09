@@ -27,7 +27,7 @@ contains no game code or data, only tools and our own runtime.
   keyboard coin/start/test (`web/play/`).
 - [x] **Saves**: EEPROM and SRAM persist in the browser (localStorage).
 - [x] **Recompiler cross-check**: per-function comparison against the interpreter
-  (`runtime/diff.c`), 828 functions checked, no differences.
+  (`runtime/diff.c`), 972 functions checked over 30,000 frames, no differences.
 - [ ] Wider coverage of late-game code paths, then step-by-step decompilation
   into readable C.
 

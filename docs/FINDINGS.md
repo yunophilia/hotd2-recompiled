@@ -280,3 +280,6 @@ stop, and dumps RAM at chosen frames (`HOTD2_DUMP_FRAMES`).
   0C0D62CC returns 4 and 0C0C0450 parks in its `bra .` error trap. Not a port bug.
 - Harness: `HOTD2_FREEZE=addr=byte@frame,...` holds RAM bytes (for coverage aids);
   shot log lines now carry the frame number.
+- Player 1 lives: byte 0x0C3D0430 (3 → 0; 0x0C3D0434 follows it). `seed-play.sh` holds it
+  at 3 so runs reach later stages: 30,000 frames found 26 more entry points, then converged.
+  The cross-check over the same 30,000 frames: 2502 checks of 972 functions, no differences.
