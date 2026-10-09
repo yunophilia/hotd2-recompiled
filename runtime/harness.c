@@ -141,7 +141,9 @@ static void shot_on_render(u64 render, const u8 *list, u32 len)
 	fprintf(f, "P6\n640 480\n255\n");
 	for (int i = 0; i < 640 * 480; i++) fwrite(&rgba[4 * i], 1, 3, f);
 	fclose(f);
-	fprintf(stderr, "shot: render %llu, %u list bytes -> %s\n", (unsigned long long)render, len, name);
+	extern u64 hle_frames;
+	fprintf(stderr, "shot: render %llu (frame %llu), %u list bytes -> %s\n", (unsigned long long)render,
+	        (unsigned long long)hle_frames, len, name);
 }
 
 /* HOTD2_DUMP_FRAMES=700,900 writes ram_<frame>.bin, same as the patched Flycast */
@@ -219,6 +221,19 @@ static void dump_on_frame(u64 frame)
 		stop("frame limit reached");
 	scripted_input(frame);
 	wav_pump();
+	/* HOTD2_FREEZE=addr=byte@from,...: hold RAM bytes every frame from frame `from`
+	 * on (e.g. lives, for coverage runs) */
+	for (const char *p = getenv("HOTD2_FREEZE"); p && *p; ) {
+		char *end;
+		u32 a = (u32)strtoul(p, &end, 16);
+		if (*end == '=') {
+			u8 v = (u8)strtoul(end + 1, &end, 0);
+			u64 from = *end == '@' ? strtoull(end + 1, &end, 10) : 0;
+			if (frame >= from) ram[a & RAM_MASK] = v;
+		}
+		p = strchr(p, ',');
+		if (p) p++;
+	}
 	static const char *spec;
 	if (!spec && !(spec = getenv("HOTD2_DUMP_FRAMES"))) spec = "";
 	for (const char *p = spec; *p; ) {

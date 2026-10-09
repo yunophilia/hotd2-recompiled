@@ -8,7 +8,7 @@ here="$(cd "$(dirname "$0")/.." && pwd)"
 iters="${1:-40}"
 frames="${2:-6000}"
 out="${3:-$HOME/hotd2/hb2}"
-script="1300:coin,1330:start,1336:-start"
+script="1300:coin,1310:coin,1330:start,1336:-start,1400:start,1410:-start,1470:start,1480:-start"
 for f in $(seq 1500 30 "$frames"); do
 	x=$(( (f * 37) % 600 + 20 )); y=$(( (f * 23) % 440 + 20 ))
 	script="$script,$f:aim=$x/$y,$((f+1)):fire,$((f+4)):-fire"

@@ -265,3 +265,18 @@ stop, and dumps RAM at chosen frames (`HOTD2_DUMP_FRAMES`).
   so ADPCM decoding stays sequential) brings the 16–22 kHz band from −23.7 dB to
   −30.2 dB of total energy, the same as Flycast's output (8–23 s window). Overall
   RMS is still ~22% above Flycast's.
+
+### Scripted play really starts a game only with two coins
+
+- With default settings the game needs **2 credits to start** ("2 CREDIT(S) TO
+  START"). The old scripts inserted one coin, so every "gameplay" run so far was
+  the attract demo and its tutorial (which shows a 1P HUD and reacts to the gun).
+  `runtime/seed-play.sh` now inserts two coins and presses start a few times; the
+  opening cutscene ("Cancel with start button") then plays and a real game runs.
+  In the browser, press 5 twice.
+- Real gameplay found one more entry point (0C06CD26), added to `data/seeds.txt`.
+- Freezing bytes that merely change with the attract demo's scene (0C19B3A7,
+  0C1A7F95) sends the game into an invalid scene load: texture allocation through
+  0C0D62CC returns 4 and 0C0C0450 parks in its `bra .` error trap. Not a port bug.
+- Harness: `HOTD2_FREEZE=addr=byte@frame,...` holds RAM bytes (for coverage aids);
+  shot log lines now carry the frame number.
