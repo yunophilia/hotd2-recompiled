@@ -7,22 +7,36 @@
 
 const VS = `#version 300 es
 in vec3 a_pos; in vec2 a_uv; in vec4 a_col; in vec4 a_ofs;
-out vec2 v_uv; out vec4 v_col; out vec4 v_ofs;
+out vec2 v_uv; out vec4 v_col; out vec4 v_ofs; out float v_z;
 void main() {
 	float z = max(a_pos.z, 1e-6);           // PVR z is 1/w, bigger is nearer
 	float w = 1.0 / z;
 	float depth = 1.0 / (1.0 + z);          // 0..1, smaller is nearer
 	gl_Position = vec4((a_pos.x / 320.0 - 1.0) * w, (1.0 - a_pos.y / 240.0) * w, depth * w, w);
-	v_uv = a_uv; v_col = a_col; v_ofs = a_ofs;
+	v_uv = a_uv; v_col = a_col; v_ofs = a_ofs; v_z = z;
 }`;
 
 const FS = `#version 300 es
 precision highp float;
-in vec2 v_uv; in vec4 v_col; in vec4 v_ofs;
+in vec2 v_uv; in vec4 v_col; in vec4 v_ofs; in float v_z;
 uniform sampler2D u_tex;
 uniform int u_textured, u_offset, u_shade, u_useAlpha, u_ignoreTexAlpha;
 uniform float u_ptRef;
+// fog: TSP bits 22-23 (0 table, 1 per vertex, 2 none, 3 table mode 2)
+uniform int u_fogMode;
+uniform vec3 u_fogColRam, u_fogColVert;
+uniform float u_fogDensity;
+uniform vec2 u_fogTable[128];   // per entry: (high byte, low byte) / 255
 out vec4 o;
+// PVR fog table: index from a pseudo-log of density * (1/w), interpolated within the entry
+float fogTable(float z) {
+	float x = clamp(z * u_fogDensity, 1.0, 255.9999);
+	float e = floor(log2(x));
+	float m = x / exp2(e) * 16.0 - 16.0;   // 0..16 within the octave
+	int i = clamp(int(e) * 16 + int(floor(m)), 0, 127);
+	vec2 t = u_fogTable[i];
+	return mix(t.x, t.y, fract(m));
+}
 void main() {
 	vec4 c = v_col;
 	if (u_useAlpha == 0) c.a = 1.0;
@@ -37,6 +51,9 @@ void main() {
 	}
 	if (u_offset == 1) r.rgb += v_ofs.rgb;
 	r = clamp(r, 0.0, 1.0);
+	if (u_fogMode == 0) r.rgb = mix(r.rgb, u_fogColRam, fogTable(v_z));
+	else if (u_fogMode == 1) r.rgb = mix(r.rgb, u_fogColVert, v_ofs.a);
+	else if (u_fogMode == 3) r = vec4(u_fogColRam, fogTable(v_z));
 	if (u_ptRef >= 0.0 && r.a < u_ptRef) discard;
 	o = r;
 }`;
@@ -62,7 +79,8 @@ export class PvrRenderer {
 		if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
 		this.prog = p;
 		this.u = {};
-		for (const n of ['u_tex', 'u_textured', 'u_offset', 'u_shade', 'u_useAlpha', 'u_ignoreTexAlpha', 'u_ptRef'])
+		for (const n of ['u_tex', 'u_textured', 'u_offset', 'u_shade', 'u_useAlpha', 'u_ignoreTexAlpha', 'u_ptRef',
+			'u_fogMode', 'u_fogColRam', 'u_fogColVert', 'u_fogDensity', 'u_fogTable'])
 			this.u[n] = gl.getUniformLocation(p, n);
 		this.vao = gl.createVertexArray();
 		this.vbo = gl.createBuffer();
@@ -116,6 +134,24 @@ export class PvrRenderer {
 		return [gl.NEVER, gl.GREATER, gl.EQUAL, gl.GEQUAL, gl.LESS, gl.NOTEQUAL, gl.LEQUAL, gl.ALWAYS][mode];
 	}
 
+	// Fog registers: colours, density (1.7 mantissa, signed exponent) and the 128-entry table.
+	setFog() {
+		const gl = this.gl, M = this.M;
+		const rgb = (v) => [((v >> 16) & 255) / 255, ((v >> 8) & 255) / 255, (v & 255) / 255];
+		gl.uniform3fv(this.u.u_fogColRam, rgb(M._web_reg(0x005F80B0)));
+		gl.uniform3fv(this.u.u_fogColVert, rgb(M._web_reg(0x005F80B4)));
+		const d = M._web_reg(0x005F80B8);
+		const ex = (d & 0x80) ? (d & 0xFF) - 256 : d & 0xFF;
+		gl.uniform1f(this.u.u_fogDensity, ((d >> 8) & 255) / 128 * Math.pow(2, ex));
+		const t = this.fogTable || (this.fogTable = new Float32Array(256));
+		for (let i = 0; i < 128; i++) {
+			const e = M._web_reg(0x005F8200 + i * 4);
+			t[i * 2] = ((e >> 8) & 255) / 255;
+			t[i * 2 + 1] = (e & 255) / 255;
+		}
+		gl.uniform2fv(this.u.u_fogTable, t);
+	}
+
 	// Draw the latest frame if it changed; returns true when something was drawn.
 	draw() {
 		const gl = this.gl, M = this.M;
@@ -139,6 +175,7 @@ export class PvrRenderer {
 		gl.uniform1i(this.u.u_tex, 0);
 		gl.activeTexture(gl.TEXTURE0);
 		const ptRef = (M._web_reg(0x005F811C) & 0xFF) / 255;
+		this.setFog();
 		for (const pass of [0, 4, 2]) {            // opaque, punch-through, translucent
 			for (let i = 0; i < ncalls; i++) {
 				const c = calls + i * 7;
@@ -162,6 +199,7 @@ export class PvrRenderer {
 				gl.uniform1i(this.u.u_useAlpha, (tsp >>> 20) & 1);
 				gl.uniform1i(this.u.u_ignoreTexAlpha, (tsp >>> 19) & 1);
 				gl.uniform1f(this.u.u_ptRef, pass === 4 ? ptRef : -1);
+				gl.uniform1i(this.u.u_fogMode, (tsp >>> 22) & 3);
 				if (textured && tex >= 0) {
 					this.texture(tex);
 					const filter = (tsp >>> 13) & 3 ? gl.LINEAR : gl.NEAREST;

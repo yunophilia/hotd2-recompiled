@@ -287,7 +287,7 @@ class Gen:
                 if m in u:
                     return u[m]
                 if m == 0xE:
-                    return f"op_fipr(c, {(n & 3) * 4}, {(n >> 2) * 4});"
+                    return f"op_fipr(c, {(n >> 2) * 4}, {(n & 3) * 4});"  # fipr FVm,FVn: n = bits 11-10 (result), m = bits 9-8
                 if m == 0xF:
                     if op == 0xF3FD:
                         return "c->fpscr ^= FPSCR_SZ;"

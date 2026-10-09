@@ -151,3 +151,10 @@
 0C0AC4A6  # from pr=0C0AC2B2
 0C0AC4E4  # from pr=0C0AC2B2
 0C094746  # from pr=0C094532
+0C0C3398  # browser, after fipr fix
+0C0C3390  # browser, after fipr fix
+0C0C3BA8  # browser, after fipr fix
+0C0C3388  # browser, after fipr fix
+0C0C3BA0  # browser, after fipr fix
+0C0C3170  # browser, after fipr fix
+0C0C36EC  # browser, after fipr fix

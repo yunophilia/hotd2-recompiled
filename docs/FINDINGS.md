@@ -283,3 +283,14 @@ stop, and dumps RAM at chosen frames (`HOTD2_DUMP_FRAMES`).
 - Player 1 lives: byte 0x0C3D0430 (3 → 0; 0x0C3D0434 follows it). `seed-play.sh` holds it
   at 3 so runs reach later stages: 30,000 frames found 26 more entry points, then converged.
   The cross-check over the same 30,000 frames: 2502 checks of 972 functions, no differences.
+
+### Lighting: fipr wrote its result to the wrong vector
+
+- `fipr FVm,FVn` (1111 nnmm 1110 1101) stores the dot product in FR[n*4+3]; both the
+  recompiler and the interpreter passed FVm as the destination, so the cross-check
+  could not see it. HOTD2's vertex lighting then lost its ambient term and clamp:
+  per-vertex intensities were raw N·L in −1..1 (half of them ≤ 0, rendered black)
+  instead of Flycast's 0.375/0.525 ambient upwards. Fixed; scenes are now lit like
+  Flycast. The fix also changes game paths (new entry points showed up).
+- WebGL renderer now applies PVR fog (TSP bits 22-23): table fog from FOG_TABLE /
+  FOG_DENSITY / FOG_COL_RAM, per-vertex fog from FOG_COL_VERT and offset alpha.

@@ -254,7 +254,7 @@ static int exec(Sh4 *c, u32 pc, u16 op)
 			case 0x9: c->fr.u[n] = 0x3F800000u; return 1;
 			case 0xA: { float s; memcpy(&s, &c->fpul, 4); dr_set(c, dn, s); return 1; }
 			case 0xB: { float s = (float)dr_get(c, dn); memcpy(&c->fpul, &s, 4); return 1; }
-			case 0xE: op_fipr(c, (int)((n & 3) * 4), (int)((n >> 2) * 4)); return 1;
+			case 0xE: op_fipr(c, (int)((n >> 2) * 4), (int)((n & 3) * 4));   /* FVn = bits 11-10 gets the result */ return 1;
 			case 0xF:
 				if (op == 0xF3FD) { c->fpscr ^= FPSCR_SZ; return 1; }
 				if (op == 0xFBFD) { fpscr_set(c, c->fpscr ^ FPSCR_FR); return 1; }
