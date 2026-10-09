@@ -60,9 +60,24 @@ function persistSave() {
 }
 
 let audioCtx;
+// ?mute: no sound reaches the speakers (the game still produces it; see hotd2AudioLevel)
+const MUTE = new URLSearchParams(location.search).has('mute');
+// Loudness of the last `ms` of game audio, read straight from the output ring:
+// { rms, peak } on a 0..32767 scale. Handy for checking sound with the page muted.
+window.hotd2AudioLevel = (ms = 500) => {
+	const size = Module._web_audio_size(), write = Module.HEAPU32[Module._web_audio_write() >> 2];
+	const ring = new Int16Array(Module.HEAPU8.buffer, Module._web_audio_ring(), size * 2);
+	const n = Math.min(size, Math.round(44.1 * ms));
+	let sum = 0, peak = 0;
+	for (let i = 0; i < n; i++) {
+		const k = ((write - n + i + size) % size) * 2;
+		for (const s of [ring[k], ring[k + 1]]) { sum += s * s; peak = Math.max(peak, Math.abs(s)); }
+	}
+	return { rms: Math.round(Math.sqrt(sum / (2 * n))), peak };
+};
 // Must be called synchronously from a user gesture (click / file pick) so audio may start.
 function prepareAudio() {
-	if (audioCtx) return;
+	if (audioCtx || MUTE) return;
 	try { audioCtx = new AudioContext({ sampleRate: 44100 }); } catch (e) { log('no audio: ' + e.message); }
 }
 
@@ -123,7 +138,8 @@ function run() {
 		r.draw();
 		if (now - last > 1000) {
 			const f = Module._web_frames(), rn = Module._web_renders();
-			$('stats').textContent = `${f - lastFrames} game fps, ${rn - lastRenders} renders/s, frame ${f}`;
+			const per = 1000 / (now - last);   // the page may have been paused for longer than a second
+			$('stats').textContent = `${Math.round((f - lastFrames) * per)} game fps, ${Math.round((rn - lastRenders) * per)} renders/s, frame ${f}`;
 			last = now; lastFrames = f; lastRenders = rn;
 		}
 		requestAnimationFrame(tick);
