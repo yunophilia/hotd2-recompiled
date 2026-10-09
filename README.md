@@ -1,4 +1,4 @@
-# hotd2-web
+# hotd2-recompiled
 
 A browser (WebAssembly) port of *The House of the Dead 2* (Sega NAOMI, 1998),
 built by statically recompiling the original SH-4 program to C and replacing the

@@ -2,7 +2,7 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "hotd2-web",
+      "name": "hotd2-recompiled",
       "runtimeExecutable": "python",
       "runtimeArgs": ["web/serve.py", "8642"],
       "port": 8642
