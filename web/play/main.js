@@ -159,14 +159,17 @@ function setupInput(canvas) {
 		else set16(IN.buttons, get16(IN.buttons) & ~TRIGGER);
 	});
 	canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+	// The game samples its inputs once per frame: keep a tap held for a few frames.
+	let startDown = 0;
 	window.addEventListener('keydown', (e) => {
 		if (e.repeat) return;
 		if (e.key === '5') set16(IN.coins, get16(IN.coins) + 1);
-		if (e.key === '1' || e.key === 'Enter') set16(IN.buttons, get16(IN.buttons) | START);
+		if (e.key === '1' || e.key === 'Enter') { set16(IN.buttons, get16(IN.buttons) | START); startDown = performance.now(); }
 		if (e.key === '9') Module.HEAPU8[base + IN.test] = 1;
 	});
 	window.addEventListener('keyup', (e) => {
-		if (e.key === '1' || e.key === 'Enter') set16(IN.buttons, get16(IN.buttons) & ~START);
+		if (e.key === '1' || e.key === 'Enter')
+			setTimeout(() => set16(IN.buttons, get16(IN.buttons) & ~START), Math.max(0, 100 - (performance.now() - startDown)));
 		if (e.key === '9') Module.HEAPU8[base + IN.test] = 0;
 	});
 	void u8;
