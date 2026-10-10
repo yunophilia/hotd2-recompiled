@@ -1,0 +1,26 @@
+From 371dcbbce3db51ffcade9c61d7993f6a653a5754 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ivan=20H=2E=20=F0=9F=8F=B3=EF=B8=8F=E2=80=8D=F0=9F=8C=88?=
+ =?UTF-8?q?=F0=9F=8F=B3=EF=B8=8F=E2=80=8D=E2=9A=A7=EF=B8=8F?=
+ <ivankun16.5@gmail.com>
+Date: Sat, 10 Oct 2026 16:54:18 -0700
+Subject: [PATCH] Screenshot at each dump frame
+
+---
+ core/emulator.cpp | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/core/emulator.cpp b/core/emulator.cpp
+index b36674a..3dfada3 100644
+--- a/core/emulator.cpp
++++ b/core/emulator.cpp
+@@ -1111,6 +1111,7 @@ static void hotd2DumpHook()
+ 	dump("vram", &vram[0], VRAM_SIZE);
+ 	dump("aram", &aica::aica_ram[0], ARAM_SIZE);
+ 	dump("aregs", &aica::aica_reg[0], 0x8000);
++	gui_takeScreenshot();   // hotd2-web: also save what Flycast rendered
+ 	NOTICE_LOG(COMMON, "hotd2-web: dumped frame %llu", (unsigned long long)frame);
+ }
+ 
+-- 
+2.53.0
+
