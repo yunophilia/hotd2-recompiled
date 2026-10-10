@@ -69,12 +69,34 @@ static int vertex_type(u32 pcw)
 
 static int vertex_bytes(int t) { return (t == 5 || t == 6 || t >= 11) ? 64 : 32; }
 
+/* ISP culling (ISP word bits 28-27): 0 none, 1 cull if smaller than FPU_CULL_VAL,
+ * 2 and 3 cull by screen-space winding. Geometry that passes beside or behind the
+ * camera comes out mirrored (the game clamps its 1/w to 100000), so its winding flips
+ * and the hardware culls it; drawing it covers the screen with the backs of walls. */
+int pvr_cull_sign = 1;   /* which winding mode 2 removes (checked against Flycast) */
+
+static int culled(const PvrState *st, const PvrVert *a, const PvrVert *b, const PvrVert *c)
+{
+	int mode = (st->isp >> 27) & 3;
+	if (!mode) return 0;
+	float area = (b->x - a->x) * (c->y - a->y) - (c->x - a->x) * (b->y - a->y);
+	if (mode == 1) {
+		u32 cv = pvr_reg(0x005F8078u);
+		float lim;
+		memcpy(&lim, &cv, 4);
+		return fabsf(area) * 0.5f < lim;
+	}
+	float s = mode == 2 ? (float)pvr_cull_sign : (float)-pvr_cull_sign;
+	return area * s < 0;
+}
+
 static void emit_tri(DecodeState *d, PvrTriFn emit, void *user, int *count)
 {
 	PvrVert *s = d->strip;
 	/* keep strip winding consistent: odd triangles swap two vertices */
-	if (d->parity) emit(user, &d->st, &s[1], &s[0], &s[2]);
-	else emit(user, &d->st, &s[0], &s[1], &s[2]);
+	const PvrVert *a = d->parity ? &s[1] : &s[0], *b = d->parity ? &s[0] : &s[1];
+	if (culled(&d->st, a, b, &s[2])) return;
+	emit(user, &d->st, a, b, &s[2]);
 	(*count)++;
 }
 

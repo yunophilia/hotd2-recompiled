@@ -148,3 +148,7 @@ EMSCRIPTEN_KEEPALIVE void web_debug_frame(const u8 *vram_dump, const u32 *regs, 
 	glframe_palette_dirty();
 	glframe_build(list, len);
 }
+
+/* debug: which winding ISP cull mode 2 removes (replay page ?cull=1|-1) */
+extern int pvr_cull_sign;
+EMSCRIPTEN_KEEPALIVE void web_debug_cull(int sign) { pvr_cull_sign = sign; }

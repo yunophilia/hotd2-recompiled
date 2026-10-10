@@ -312,3 +312,19 @@ stop, and dumps RAM at chosen frames (`HOTD2_DUMP_FRAMES`).
   z clamped to 100000 and x/y ~1e11 (geometry at the camera); the WebGL path rebuilds
   homogeneous coordinates and draws them correctly. `HOTD2_LISTDUMP` now also writes
   VRAM and PVR registers; `web/play/?replay=N[,M,...]` draws dumped frames with WebGL.
+
+### Back-face culling and per-pixel depth (title background, "walls" by the camera)
+
+- The title-screen background drew as a mosaic of flat squares, and in gameplay a
+  textured "wall" could fill the screen beside the camera. Both were the backs of
+  polygons that pass beside or behind the camera: the game clamps their 1/w to
+  100000, their screen coordinates reach ~1e9 and their winding flips. ISP word bits
+  28-27 select culling (0 none, 1 smaller than FPU_CULL_VAL, 2/3 by winding); HOTD2
+  uses mode 2, which removes them. We did no culling. Now done in pvr_decode (shared by
+  both renderers); mode 2 removes negative screen-space area (y down), checked against
+  Flycast's title screen.
+- WebGL depth is now written per pixel from screen-linear 1/w (perspective-correct
+  interpolation of w gives 1/z_linear), as the PVR depth-tests; interpolating a
+  per-vertex depth value was badly wrong across such polygons. Fog uses the same z.
+- VRAM texture contents matched Flycast byte for byte throughout; the decoders were fine.
+- Flycast patch: the dump hook also calls gui_takeScreenshot() for side-by-side checks.

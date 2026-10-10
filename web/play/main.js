@@ -239,6 +239,8 @@ if (REPLAY && ['localhost', '127.0.0.1'].includes(location.hostname)) {
 		$('overlay').hidden = true;
 		await moduleReady;
 		const ids = REPLAY.split(',');
+		const cull = new URLSearchParams(location.search).get('cull');
+		if (cull) Module._web_debug_cull(+cull);
 		const canvas = $('screen');
 		const r = new PvrRenderer(canvas, Module);
 		const sheet = document.createElement('canvas');
@@ -260,5 +262,6 @@ if (REPLAY && ['localhost', '127.0.0.1'].includes(location.hostname)) {
 		}
 		if (ids.length > 1) { canvas.replaceWith(sheet); sheet.id = 'screen'; sheet.style.width = '100%'; }
 		window.hotd2Replayed = true;
+		window.hotd2Renderer = r;   // debug: lets the console redraw the last replayed frame
 	})().catch((e) => log('replay failed: ' + e.message));
 }

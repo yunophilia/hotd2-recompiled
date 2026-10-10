@@ -7,18 +7,18 @@
 
 const VS = `#version 300 es
 in vec3 a_pos; in vec2 a_uv; in vec4 a_col; in vec4 a_ofs;
-out vec2 v_uv; out vec4 v_col; out vec4 v_ofs; out float v_z;
+out vec2 v_uv; out vec4 v_col; out vec4 v_ofs; out float v_w;
 void main() {
 	float z = max(a_pos.z, 1e-6);           // PVR z is 1/w, bigger is nearer
 	float w = 1.0 / z;
-	float depth = 1.0 / (1.0 + z);          // 0..1, smaller is nearer
-	gl_Position = vec4((a_pos.x / 320.0 - 1.0) * w, (1.0 - a_pos.y / 240.0) * w, depth * w, w);
-	v_uv = a_uv; v_col = a_col; v_ofs = a_ofs; v_z = z;
+	// depth is written per pixel in the fragment shader; keep clip z mid-range
+	gl_Position = vec4((a_pos.x / 320.0 - 1.0) * w, (1.0 - a_pos.y / 240.0) * w, 0.5 * w, w);
+	v_uv = a_uv; v_col = a_col; v_ofs = a_ofs; v_w = w;
 }`;
 
 const FS = `#version 300 es
 precision highp float;
-in vec2 v_uv; in vec4 v_col; in vec4 v_ofs; in float v_z;
+in vec2 v_uv; in vec4 v_col; in vec4 v_ofs; in float v_w;
 uniform sampler2D u_tex;
 uniform int u_textured, u_offset, u_shade, u_useAlpha, u_ignoreTexAlpha;
 uniform float u_ptRef;
@@ -38,6 +38,12 @@ float fogTable(float z) {
 	return mix(t.x, t.y, fract(m));
 }
 void main() {
+	// The PVR interpolates z = 1/w linearly across the screen and depth-tests it per
+	// pixel. Perspective-correct interpolation of w gives exactly 1 / (screen-linear z).
+	// (Interpolating a per-vertex depth is badly wrong for polygons that pass right
+	// by the camera, where z runs from ~0.002 to the game's clamp of 100000.)
+	float z = 1.0 / v_w;
+	gl_FragDepth = 1.0 / (1.0 + z);         // 0..1, smaller is nearer
 	vec4 c = v_col;
 	if (u_useAlpha == 0) c.a = 1.0;
 	vec4 r = c;
@@ -51,9 +57,9 @@ void main() {
 	}
 	if (u_offset == 1) r.rgb += v_ofs.rgb;
 	r = clamp(r, 0.0, 1.0);
-	if (u_fogMode == 0) r.rgb = mix(r.rgb, u_fogColRam, fogTable(v_z));
+	if (u_fogMode == 0) r.rgb = mix(r.rgb, u_fogColRam, fogTable(z));
 	else if (u_fogMode == 1) r.rgb = mix(r.rgb, u_fogColVert, v_ofs.a);
-	else if (u_fogMode == 3) r = vec4(u_fogColRam, fogTable(v_z));
+	else if (u_fogMode == 3) r = vec4(u_fogColRam, fogTable(z));
 	if (u_ptRef >= 0.0 && r.a < u_ptRef) discard;
 	o = r;
 }`;
