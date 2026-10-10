@@ -161,7 +161,7 @@ export class PvrRenderer {
 		if (seq === this.lastSeq || seq === 0) return false;
 		this.lastSeq = seq;
 		const nverts = H[f + 1], ncalls = H[f + 2], verts = H[f + 3], calls = H[f + 4] >> 2;
-		gl.viewport(0, 0, 640, 480);
+		gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);   // canvas may be sized above 640x480 for sharper output
 		gl.clearColor(0, 0, 0, 1);
 		gl.clearDepth(1);
 		gl.depthMask(true);

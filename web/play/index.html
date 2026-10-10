@@ -20,12 +20,16 @@
 	#stats { margin-top: 8px; color: var(--muted); font: 12px ui-monospace, monospace; }
 	#log { margin-top: 8px; height: 140px; overflow: auto; font: 12px/1.35 ui-monospace, monospace; color: var(--muted); white-space: pre-wrap; }
 	kbd { border: 1px solid #444; padding: 0 4px; border-radius: 3px; }
+	#stage:fullscreen { display: grid; place-items: center; background: #000; }
+	#stage:fullscreen canvas { width: min(100vw, calc(100vh * 4 / 3)); height: auto; aspect-ratio: 4 / 3; }
+	.bar { display: flex; gap: 12px; align-items: center; justify-content: space-between; margin-top: 8px; }
+	.bar button { padding: 4px 10px; font-size: 12px; }
 </style>
 </head>
 <body>
 <main>
 	<h1>The House of the Dead 2 — recompiled</h1>
-	<p class="sub">Mouse = gun (left button fires, right button reloads) · <kbd>5</kbd> coin, then <kbd>1</kbd> or <kbd>Enter</kbd> start · <kbd>9</kbd> test</p>
+	<p class="sub">Mouse = gun (left button fires, right button reloads) · <kbd>5</kbd> coin, then <kbd>1</kbd> or <kbd>Enter</kbd> start · <kbd>9</kbd> test · <kbd>F</kbd> fullscreen</p>
 	<div id="stage">
 		<canvas id="screen" width="640" height="480"></canvas>
 		<div id="overlay">
@@ -36,7 +40,7 @@
 			</div>
 		</div>
 	</div>
-	<div id="stats"></div>
+	<div class="bar"><div id="stats"></div><button id="fullscreen" hidden>Fullscreen</button></div>
 	<div id="log"></div>
 </main>
 <script type="module" src="main.js"></script>

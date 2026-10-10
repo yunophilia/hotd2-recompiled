@@ -141,6 +141,13 @@ function run() {
 	const canvas = $('screen');
 	const r = new PvrRenderer(canvas, Module);
 	setupInput(canvas);
+	// render at the canvas's real on-screen resolution (sharper than 640x480 stretched)
+	new ResizeObserver(() => {
+		const box = canvas.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+		const w = Math.max(640, Math.min(3840, Math.round(box.width * dpr)));
+		if (canvas.width !== w) { canvas.width = w; canvas.height = Math.round(w * 3 / 4); r.lastSeq = -1; }
+	}).observe(canvas);
+	$('fullscreen').hidden = false;
 	let last = performance.now(), lastFrames = 0, lastRenders = 0;
 	const tick = (now) => {
 		r.draw();
@@ -190,6 +197,7 @@ function setupInput(canvas) {
 		if (e.key === '5') set16(IN.coins, get16(IN.coins) + 2);   // one game's worth: the game needs 2 credits to start
 		if (e.key === '1' || e.key === 'Enter') { set16(IN.buttons, get16(IN.buttons) | START); startDown = performance.now(); }
 		if (e.key === '9') Module.HEAPU8[base + IN.test] = 1;
+		if (e.key === 'f' || e.key === 'F') toggleFullscreen();
 	});
 	window.addEventListener('keyup', (e) => {
 		if (e.key === '1' || e.key === 'Enter')
@@ -198,6 +206,12 @@ function setupInput(canvas) {
 	});
 	void u8;
 }
+
+function toggleFullscreen() {
+	if (document.fullscreenElement) document.exitFullscreen();
+	else $('stage').requestFullscreen().catch(() => {});
+}
+$('fullscreen').addEventListener('click', (e) => { e.currentTarget.blur(); toggleFullscreen(); });
 
 $('rom').addEventListener('change', async (e) => {
 	const f = e.target.files[0];

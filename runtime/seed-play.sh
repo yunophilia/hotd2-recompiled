@@ -2,7 +2,8 @@
 # Discover entry points the static analysis misses by playing the game natively:
 # coin + start, then shoot around. Every run that stops on an unknown target
 # appends it to data/seeds.txt and rebuilds. (run inside WSL)
-# Player 1 never runs out of lives (0x0C3D0430 held at 3) so runs reach later
+# Player 1 never runs out of lives (0x0C3D0430 held at 3) and boss health (float at
+# 0x0C3D11FC) is held at 0 once the first boss fight starts, so runs reach later
 # stages; set HOTD2_FREEZE= (empty) to play fair.
 #   runtime/seed-play.sh [iterations] [frames] [build dir]
 set -uo pipefail
@@ -17,7 +18,7 @@ for f in $(seq 1500 30 "$frames"); do
 	if (( f % 300 == 0 )); then script="$script,$((f+8)):reload,$((f+12)):-reload"; fi
 done
 cd "$out"
-export HOTD2_FREEZE="${HOTD2_FREEZE-0C3D0430=3@1500}"
+export HOTD2_FREEZE="${HOTD2_FREEZE-0C3D0430=3@1500,0C3D11FC=0@27000,0C3D11FD=0@27000,0C3D11FE=0@27000,0C3D11FF=0@27000}"
 for i in $(seq 1 "$iters"); do
 	[ -f missing.txt ] && grep -v "^00000000" missing.txt >> "$here/data/seeds.txt"
 	rm -f missing.txt
