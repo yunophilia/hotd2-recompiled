@@ -23,13 +23,20 @@ contains no game code or data, only tools and our own runtime.
 - [x] **Sound**: ARM7 interpreter + AICA model run the game's own sound driver;
   output via AudioWorklet in the browser, with sample interpolation. (HOTD2 leaves
   the per-voice filter and effects DSP unused, so they are not emulated.)
-- [x] **Browser build**: 60 fps attract mode and gameplay, mouse/touch gun,
-  keyboard coin/start/test (`web/play/`).
+- [x] **Browser build**: 60 fps through all chapters tested so far (automated
+  play reaches chapter 3), mouse/touch gun, full-resolution WebGL rendering with
+  fog and render-to-texture, fullscreen, NAOMI test menu (`web/play/`).
 - [x] **Saves**: EEPROM and SRAM persist in the browser (localStorage).
 - [x] **Recompiler cross-check**: per-function comparison against the interpreter
   (`runtime/diff.c`), 972 functions checked over 30,000 frames, no differences.
-- [ ] Wider coverage of late-game code paths, then step-by-step decompilation
-  into readable C.
+- [ ] Coverage of the last chapters and the ending (in progress).
+
+## Playing
+
+Load your `hotd2.zip`, then: **5** inserts coins (one game's worth), **1** or
+**Enter** starts, the mouse is the gun (left button fires, right button aims
+off-screen to reload), **F** toggles fullscreen. **9** opens the NAOMI test menu,
+**0** is the service button that moves its cursor, **9** again selects.
 
 See `docs/FINDINGS.md` for everything learned about the hardware and the game.
 
@@ -68,8 +75,15 @@ dev server can also serve it from `HOTD2_ROM_DIR` (default `C:\RetroBat\roms\nao
 `HOTD2_SHOTS=render numbers` (software-rendered frames as PPM) · `HOTD2_WAV=out.wav` ·
 `HOTD2_DUMP_FRAMES=…` (RAM and AICA register dumps) · `HOTD2_REGION=0|1|2` ·
 `HOTD2_LISTCRC=file` / `HOTD2_LISTDUMP=renders` (display-list CRCs / raw lists) ·
-`HOTD2_INTERP_ALL=1` (interpret everything). Build with `HOTD2_CFLAGS=-DHOTD2_DIFF`
-for the per-function recompiler-vs-interpreter check (`runtime/diff.c`).
+`HOTD2_INTERP_ALL=1` (interpret everything) · `HOTD2_FREEZE=addr=byte@frame,…`
+(hold RAM bytes, e.g. infinite lives for coverage) · `HOTD2_INPUT=@file` (script from
+a file). Build with `HOTD2_CFLAGS=-DHOTD2_DIFF` for the per-function
+recompiler-vs-interpreter check (`runtime/diff.c`).
+
+`HOTD2_LISTDUMP=N` also writes VRAM and PVR register dumps; copy them to `web/replay/`
+(gitignored) and open `play/?replay=N[,M,…]` to draw those frames with the WebGL
+renderer. `play/?mute` runs the audio player at zero volume (`hotd2AudioStats` in
+the console reports buffer health).
 
 ## Reference emulator
 
