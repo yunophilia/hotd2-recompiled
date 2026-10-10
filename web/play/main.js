@@ -104,6 +104,7 @@ async function startAudio() {
 
 async function start(zipBytes) {
 	$('overlay').hidden = true;
+	if (document.activeElement) document.activeElement.blur();   // so Enter reaches the game, not the button
 	log('reading ROM set...');
 	const zip = await readZip(zipBytes);
 	await moduleReady;
@@ -179,7 +180,7 @@ function setupInput(canvas) {
 	let startDown = 0;
 	window.addEventListener('keydown', (e) => {
 		if (e.repeat) return;
-		if (e.key === '5') set16(IN.coins, get16(IN.coins) + 1);
+		if (e.key === '5') set16(IN.coins, get16(IN.coins) + 2);   // one game's worth: the game needs 2 credits to start
 		if (e.key === '1' || e.key === 'Enter') { set16(IN.buttons, get16(IN.buttons) | START); startDown = performance.now(); }
 		if (e.key === '9') Module.HEAPU8[base + IN.test] = 1;
 	});
