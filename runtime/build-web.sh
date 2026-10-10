@@ -18,7 +18,7 @@ emcc -O2 -pthread "$out"/obj/*.o -o "$here/web/game/hotd2.js" \
 	-sENVIRONMENT=web,worker -sPTHREAD_POOL_SIZE=2 \
 	-sINITIAL_MEMORY=768MB -sMAXIMUM_MEMORY=2GB -sALLOW_MEMORY_GROWTH \
 	-sSTACK_SIZE=1MB -sDEFAULT_PTHREAD_STACK_SIZE=8MB \
-	-sEXPORTED_FUNCTIONS=_malloc \
+	-sEXPORTED_FUNCTIONS=_malloc,_free \
 	-sEXPORTED_RUNTIME_METHODS=HEAPU8,HEAPU32,HEAPF32,HEAP32 \
 	-sINVOKE_RUN=0 -sEXIT_RUNTIME=0
 echo "built $here/web/game/hotd2.js"

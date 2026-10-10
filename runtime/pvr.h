@@ -28,6 +28,9 @@ int pvr_decode(const u8 *list, u32 len, PvrTriFn emit, void *user);
 /* Render a parameter stream into rgba (640*480*4), cleared to the background first. */
 void pvr_render_soft(const u8 *list, u32 len, u8 *rgba);
 
+/* Render-to-texture (FB_W_SOF1 bit 24): draw the list and write it into VRAM. */
+void pvr_render_rtt(const u8 *list, u32 len);
+
 /* Texture texel fetch (RGBA 0..255) for a polygon's TSP/TCW at integer texel coordinates. */
 void pvr_texel(u32 tsp, u32 tcw, int x, int y, u8 out[4]);
 

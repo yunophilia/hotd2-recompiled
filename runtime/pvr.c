@@ -2,6 +2,7 @@
  * rasteriser. See pvr.h. Written from the PVR2 parameter format: 32-byte
  * parameters, some 64-byte; PCW in the first word of each. */
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "pvr.h"
@@ -559,4 +560,43 @@ void pvr_render_soft(const u8 *list, u32 len, u8 *rgba)
 		r.pass = order[k];
 		pvr_decode(list, len, raster_tri, &r);
 	}
+}
+
+/* Render-to-texture: when FB_W_SOF1 has bit 24 set the game is drawing into a
+ * texture (screen transitions, the shattering-glass effect...). Draw the list
+ * in software and pack it into VRAM the way the PVR's framebuffer writer would:
+ * FB_W_CTRL picks the 16-bit format, FB_W_LINESTRIDE the row pitch (8-byte
+ * units), FB_X_CLIP/FB_Y_CLIP the size. */
+void glframe_vram_dirty(u32 off, u32 len);
+
+void pvr_render_rtt(const u8 *list, u32 len)
+{
+	static u8 rgba[W * H * 4];
+	u32 ctrl = pvr_reg(0x005F8048u), sof1 = pvr_reg(0x005F8060u) & 0x00FFFFFFu;
+	u32 xclip = pvr_reg(0x005F8068u), yclip = pvr_reg(0x005F806Cu);
+	int w = (int)((xclip >> 16) & 0x7FF) + 1, h = (int)((yclip >> 16) & 0x3FF) + 1;
+	if (w > W) w = W;
+	if (h > H) h = H;
+	u32 stride = (pvr_reg(0x005F804Cu) & 0x1FF) * 8;
+	if (!stride) stride = (u32)w * 2;
+	pvr_render_soft(list, len, rgba);
+	int mode = ctrl & 7;
+	u32 kbit = (ctrl >> 15) & 1, athresh = (ctrl >> 16) & 0xFF;
+	for (int y = 0; y < h; y++) {
+		u32 row = sof1 + (u32)y * stride;
+		if (row + (u32)w * 2 > sizeof vram) break;
+		for (int x = 0; x < w; x++) {
+			const u8 *p = &rgba[(y * W + x) * 4];
+			u32 r = p[0], g = p[1], b = p[2], a = p[3];
+			u16 v;
+			switch (mode) {
+			case 1:  v = (u16)((r >> 3) << 11 | (g >> 2) << 5 | b >> 3); break;                       /* 565 */
+			case 2:  v = (u16)((a >> 4) << 12 | (r >> 4) << 8 | (g >> 4) << 4 | b >> 4); break;     /* 4444 */
+			case 3:  v = (u16)((a >= athresh) << 15 | (r >> 3) << 10 | (g >> 3) << 5 | b >> 3); break; /* 1555 */
+			default: v = (u16)(kbit << 15 | (r >> 3) << 10 | (g >> 3) << 5 | b >> 3); break;          /* 0555 + K */
+			}
+			memcpy(&vram[row + (u32)x * 2], &v, 2);
+		}
+	}
+	glframe_vram_dirty(sof1, (u32)h * stride);
 }

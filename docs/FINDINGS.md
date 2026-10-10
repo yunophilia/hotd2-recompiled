@@ -294,3 +294,21 @@ stop, and dumps RAM at chosen frames (`HOTD2_DUMP_FRAMES`).
   Flycast. The fix also changes game paths (new entry points showed up).
 - WebGL renderer now applies PVR fog (TSP bits 22-23): table fog from FOG_TABLE /
   FOG_DENSITY / FOG_COL_RAM, per-vertex fog from FOG_COL_VERT and offset alpha.
+
+### Performance, audio, render-to-texture, WebGL replay
+
+- Audio stutter came from the game thread running at ~54 fps in the browser (the
+  ring got 39.9k instead of 44.1k samples/s). gprof on the native build: indirect
+  call lookup (binary search) 27%, store-queue writes through the MMIO path, per-sample
+  pow() in the AICA mixer, ARM fetch through the debug-counting read. Fixed with a
+  direct address table + per-call-site cache (CALL_IND), inline SQ writes, gain tables,
+  direct ARM fetch: ~1.8x faster; browser holds 60 fps and 44.1k samples/s. The worklet
+  now resamples ±2% around a 3072-frame target and fades instead of hard silence.
+- HOTD2's frame delay loop (f_0c0a3bcc) calls a function pointer 513 times per call,
+  ~190k indirect calls per frame: the reason indirect calls dominated.
+- Render-to-texture (FB_W_SOF1 bit 24, as in Flycast) is now drawn by the software
+  renderer and packed into VRAM per FB_W_CTRL; HOTD2 did not use it in 40k frames.
+- Streaky/tiled frames in the native software renderer come from vertices with
+  z clamped to 100000 and x/y ~1e11 (geometry at the camera); the WebGL path rebuilds
+  homogeneous coordinates and draws them correctly. `HOTD2_LISTDUMP` now also writes
+  VRAM and PVR registers; `web/play/?replay=N[,M,...]` draws dumped frames with WebGL.

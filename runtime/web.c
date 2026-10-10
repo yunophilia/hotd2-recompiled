@@ -133,3 +133,18 @@ EMSCRIPTEN_KEEPALIVE u32 web_reg(u32 phys) { return pvr_reg(phys); }
 EMSCRIPTEN_KEEPALIVE GlFrame *web_frame(void) { return glframe_latest(); }
 EMSCRIPTEN_KEEPALIVE u32 web_tex_count(void) { return glf_ntex; }
 EMSCRIPTEN_KEEPALIVE GlTex *web_tex(u32 i) { return &glf_tex[i]; }
+
+/* Debug replay (web/play/?replay=N): draw a frame dumped by the harness
+ * (HOTD2_LISTDUMP) with the real WebGL path, without running the game. */
+u32 *hle_pvr_regs(void);
+void glframe_vram_dirty(u32 off, u32 len);
+void glframe_palette_dirty(void);
+extern u8 vram[0x1000000];
+EMSCRIPTEN_KEEPALIVE void web_debug_frame(const u8 *vram_dump, const u32 *regs, const u8 *list, u32 len)
+{
+	memcpy(vram, vram_dump, sizeof vram);
+	memcpy(hle_pvr_regs(), regs, 0x2000);
+	glframe_vram_dirty(0, sizeof vram);
+	glframe_palette_dirty();
+	glframe_build(list, len);
+}

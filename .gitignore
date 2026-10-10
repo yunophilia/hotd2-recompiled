@@ -8,3 +8,4 @@ out/
 __pycache__/
 web/flycast/
 web/game/
+web/replay/

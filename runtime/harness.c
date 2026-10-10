@@ -132,6 +132,13 @@ static void shot_on_render(u64 render, const u8 *list, u32 len)
 		snprintf(name, sizeof name, "list_%llu.bin", (unsigned long long)render);
 		FILE *f = fopen(name, "wb");
 		if (f) { fwrite(list, 1, len, f); fclose(f); }
+		/* with VRAM and the PVR registers, web/play/?replay=N can draw this frame in WebGL */
+		extern u8 vram[0x1000000];
+		u32 *hle_pvr_regs(void);
+		snprintf(name, sizeof name, "vram_%llu.bin", (unsigned long long)render);
+		if ((f = fopen(name, "wb"))) { fwrite(vram, 1, sizeof vram, f); fclose(f); }
+		snprintf(name, sizeof name, "pvr_%llu.bin", (unsigned long long)render);
+		if ((f = fopen(name, "wb"))) { fwrite(hle_pvr_regs(), 4, 0x800, f); fclose(f); }
 	}
 	if (!listed(getenv("HOTD2_SHOTS"), render)) return;
 	pvr_render_soft(list, len, rgba);

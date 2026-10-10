@@ -10,6 +10,7 @@
 #include "jvs.h"
 #include "cart.h"
 #include "ta.h"
+#include "pvr.h"
 #include "glframe.h"
 #include "aica.h"
 
@@ -153,6 +154,8 @@ void (*hle_on_frame)(u64 frame);   /* debug hook, called at every vblank-in */
 void (*hle_on_render)(u64 render, const u8 *list, u32 len);
 
 u32 pvr_reg(u32 phys) { return pvr[(phys - 0x005F8000u) / 4 & 0x7FF]; }
+/* the whole PVR register block (0x5F8000-0x5F9FFF, palette included), for debug dumps */
+u32 *hle_pvr_regs(void) { return pvr; }
 
 #define SB(a) sb[((a) - 0x005F6800u) / 4]
 #define PVR(a) pvr[((a) - 0x005F8000u) / 4]
@@ -438,11 +441,12 @@ void hle_write(u32 addr, u32 value, int size)
 	if (p == 0x005F8014u) {                         /* STARTRENDER */
 		extern u64 hle_renders;
 		hle_renders++;
-		if (hle_on_render) {
-			u32 len;
-			const u8 *list = ta_frame_for(PVR(0x005F8020u), &len);   /* PARAM_BASE */
+		u32 len;
+		const u8 *list = ta_frame_for(PVR(0x005F8020u), &len);       /* PARAM_BASE */
+		if (PVR(0x005F8060u) & 0x01000000u)                          /* FB_W_SOF1: into a texture */
+			pvr_render_rtt(list, len);
+		else if (hle_on_render)
 			hle_on_render(hle_renders, list, len);
-		}
 		hle_raise_normal(0); hle_raise_normal(1); hle_raise_normal(2);
 	}
 	if (p == 0x005F7418u && (value & 1) && (SB(0x005F7414u) & 1))

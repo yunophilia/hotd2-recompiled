@@ -212,3 +212,37 @@ if (['localhost', '127.0.0.1'].includes(location.hostname)) {
 		start(new Uint8Array(await r.arrayBuffer())).catch((err) => log('error: ' + err.message));
 	});
 }
+
+// Debug replay (localhost only): ?replay=N draws list_N.bin / vram_N.bin / pvr_N.bin
+// from web/replay/ (dumped by the native harness with HOTD2_LISTDUMP=N) with the
+// WebGL renderer, without running the game. ?replay=A,B,C,... tiles several
+// renders into a contact sheet of 320x240 thumbnails.
+const REPLAY = new URLSearchParams(location.search).get('replay');
+if (REPLAY && ['localhost', '127.0.0.1'].includes(location.hostname)) {
+	(async () => {
+		$('overlay').hidden = true;
+		await moduleReady;
+		const ids = REPLAY.split(',');
+		const canvas = $('screen');
+		const r = new PvrRenderer(canvas, Module);
+		const sheet = document.createElement('canvas');
+		const cols = Math.min(4, ids.length);
+		sheet.width = ids.length > 1 ? 320 * cols : 640;
+		sheet.height = ids.length > 1 ? 240 * Math.ceil(ids.length / cols) : 480;
+		const g = sheet.getContext('2d');
+		for (const [i, id] of ids.entries()) {
+			const get = async (n) => new Uint8Array(await (await fetch(`../replay/${n}_${id}.bin`)).arrayBuffer());
+			const [list, vram, regs] = await Promise.all([get('list'), get('vram'), get('pvr')]);
+			const put = (u8) => { const p = Module._web_alloc(u8.length); Module.HEAPU8.set(u8, p); return p; };
+			const pv = put(vram), pr = put(regs), pl = put(list);
+			Module._web_debug_frame(pv, pr, pl, list.length);
+			for (const p of [pv, pr, pl]) Module._free(p);
+			r.lastSeq = -1;
+			r.draw();
+			if (ids.length > 1) g.drawImage(canvas, (i % cols) * 320, Math.floor(i / cols) * 240, 320, 240);
+			log(`replayed render ${id}: ${list.length} list bytes`);
+		}
+		if (ids.length > 1) { canvas.replaceWith(sheet); sheet.id = 'screen'; sheet.style.width = '100%'; }
+		window.hotd2Replayed = true;
+	})().catch((e) => log('replay failed: ' + e.message));
+}
