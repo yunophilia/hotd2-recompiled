@@ -60,7 +60,7 @@ function persistSave() {
 }
 
 let audioCtx;
-// ?mute: no sound reaches the speakers (the game still produces it; see hotd2AudioLevel)
+// ?mute: the player runs at zero volume (for testing: see hotd2AudioLevel and hotd2AudioStats)
 const MUTE = new URLSearchParams(location.search).has('mute');
 // Loudness of the last `ms` of game audio, read straight from the output ring:
 // { rms, peak } on a 0..32767 scale. Handy for checking sound with the page muted.
@@ -77,7 +77,7 @@ window.hotd2AudioLevel = (ms = 500) => {
 };
 // Must be called synchronously from a user gesture (click / file pick) so audio may start.
 function prepareAudio() {
-	if (audioCtx || MUTE) return;
+	if (audioCtx) return;
 	try { audioCtx = new AudioContext({ sampleRate: 44100 }); } catch (e) { log('no audio: ' + e.message); }
 }
 
@@ -92,7 +92,14 @@ async function startAudio() {
 			write: Module._web_audio_write(),
 			size: Module._web_audio_size(),
 		});
-		node.connect(audioCtx.destination);
+		node.port.onmessage = (e) => { window.hotd2AudioStats = e.data; };
+		if (MUTE) {
+			const silent = audioCtx.createGain();
+			silent.gain.value = 0;
+			node.connect(silent).connect(audioCtx.destination);
+		} else {
+			node.connect(audioCtx.destination);
+		}
 		const resume = () => audioCtx.state !== 'running' && audioCtx.resume();
 		window.addEventListener('pointerdown', resume);
 		window.addEventListener('keydown', resume);

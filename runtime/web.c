@@ -13,6 +13,7 @@
 #include <unistd.h>
 #include "sh4ctx.h"
 #include "funcs.h"
+#include "lookup.h"
 #include "jvs.h"
 #include "glframe.h"
 
@@ -29,14 +30,7 @@ extern void (*hle_on_render)(u64 render, const u8 *list, u32 len);
 
 void (*sh4_lookup(u32 target))(Sh4 *)
 {
-	u32 lo = 0, hi = func_count, t = target & 0x1FFFFFFF;
-	while (lo < hi) {
-		u32 mid = (lo + hi) / 2;
-		u32 a = func_table[mid].addr & 0x1FFFFFFF;
-		if (a == t) return func_table[mid].fn;
-		if (a < t) lo = mid + 1; else hi = mid;
-	}
-	return NULL;
+	return func_lookup(target);
 }
 
 void sh4_interp(Sh4 *c, u32 pc);

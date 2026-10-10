@@ -16,5 +16,5 @@ srcs=("$out"/gen/*.c "$here"/runtime/harness.c "$here"/runtime/hle.c "$here"/run
       "$here"/runtime/cart.c "$here"/runtime/ta.c "$here"/runtime/coro.c "$here"/runtime/pvr.c "$here"/runtime/glframe.c "$here"/runtime/interp.c "$here"/runtime/aica.c "$here"/runtime/arm7.c "$here"/runtime/diff.c)
 mkdir -p obj
 printf '%s\n' "${srcs[@]}" | xargs -P"$(nproc)" -I{} sh -c 'o=obj/$(basename {} .c).o; [ "$o" -nt {} ] || gcc -O1 -g -w ${HOTD2_CFLAGS:-} -I'"$here"'/runtime -I'"$out"'/gen -c {} -o "$o"'
-gcc obj/*.o -lm -o harness
+gcc ${HOTD2_CFLAGS:-} obj/*.o -lm -o harness
 echo "built $out/harness"

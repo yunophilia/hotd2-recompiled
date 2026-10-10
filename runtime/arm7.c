@@ -2,6 +2,8 @@
  * has no Thumb). See arm7.h. */
 #include <string.h>
 #include "arm7.h"
+#include <string.h>
+extern u8 aica_ram[0x800000];
 
 Arm7 arm7;
 u64 arm7_fiqs;
@@ -383,7 +385,12 @@ void arm7_run(int cycles)
 			arm7_fiqs++;
 		}
 		u32 pc = arm7.r[15];
-		u32 instr = arm_read32(pc);
+#ifdef ARM_PROFILE
+		{ extern u32 arm_pc_hist[0x4000]; if (pc < 0x10000) arm_pc_hist[pc >> 2]++; }
+#endif
+		u32 instr;
+		if (pc < 0x800000) memcpy(&instr, &aica_ram[pc & 0x7FFFFC], 4);   /* code lives in sound RAM */
+		else instr = arm_read32(pc);
 		arm7.r[15] = pc + 4;       /* next instruction; branches overwrite it */
 		execute(instr);
 		arm7.cycles++;

@@ -186,6 +186,14 @@ static void envelope(int c, Chan *k)
 	k->eg = (int)*e;
 }
 
+/* 2^(-att/16) for attenuations 0..254 (0.375 dB steps); 255 and up is silent */
+static float att_gain(int att)
+{
+	static float tbl[255];
+	if (!tbl[0]) for (int i = 0; i < 255; i++) tbl[i] = (float)pow(2.0, -i / 16.0);
+	return att < 0 ? 1.0f : att < 255 ? tbl[att] : 0.0f;
+}
+
 static void voice(int c, Chan *k, int *out_l, int *out_r)
 {
 	envelope(c, k);
@@ -243,7 +251,7 @@ static void voice(int c, Chan *k, int *out_l, int *out_r)
 		int imxl = (CR(c, 0x20) >> 4) & 15;
 		int att = base + send_level[imxl];
 		if (att < 255) {
-			int v = (int)(s * pow(2.0, -att / 16.0));
+			int v = (int)(s * att_gain(att));
 			*out_l += v;
 			*out_r += v;
 		}
@@ -251,13 +259,13 @@ static void voice(int c, Chan *k, int *out_l, int *out_r)
 	}
 	int full = base + send_level[disdl];
 	aica_dbg_sumsq[c] += (double)s * s;
-	aica_dbg_gain[c] += pow(2.0, -full / 16.0);
+	aica_dbg_gain[c] += att_gain(full);
 	aica_dbg_n[c]++;
 	int panned = full + send_level[15 - (dipan & 15)];
 	int att_l = (dipan & 16) ? full : panned;      /* bit 4 set: the right side is attenuated */
 	int att_r = (dipan & 16) ? panned : full;
-	if (att_l < 255) *out_l += (int)(s * pow(2.0, -att_l / 16.0));
-	if (att_r < 255) *out_r += (int)(s * pow(2.0, -att_r / 16.0));
+	if (att_l < 255) *out_l += (int)(s * att_gain(att_l));
+	if (att_r < 255) *out_r += (int)(s * att_gain(att_r));
 }
 
 /* ---------------- timers ---------------- */
@@ -343,8 +351,10 @@ u32 arm_reg_reads[0x4000], arm_reg_writes[0x4000];   /* debug: ARM accesses per 
 u32 arm_read32(u32 a)
 {
 	a &= 0x00FFFFFF;
+#ifdef ARM_DEBUG   /* per-address access counts, printed by the harness */
 	if (a < 0x800) arm_watch[a >> 2]++;
 	if (a >= 0x800000 && a < 0x810000) arm_reg_reads[(a & 0xFFFF) >> 2]++;
+#endif
 	if (a < 0x800000) { u32 v; memcpy(&v, &aica_ram[a & 0x7FFFFC], 4); return v; }
 	return aica_reg_read(a - 0x800000, 4) & 0xFFFF;
 }
@@ -352,21 +362,27 @@ u8 arm_read8(u32 a)
 {
 	a &= 0x00FFFFFF;
 	if (a < 0x800000) return aica_ram[a];
+#ifdef ARM_DEBUG
 	arm_reg_reads[(a & 0xFFFF) >> 2]++;
+#endif
 	return (u8)aica_reg_read(a - 0x800000, 1);
 }
 void arm_write32(u32 a, u32 v)
 {
 	a &= 0x00FFFFFF;
 	if (a < 0x800000) { memcpy(&aica_ram[a & 0x7FFFFC], &v, 4); return; }
+#ifdef ARM_DEBUG
 	arm_reg_writes[(a & 0xFFFF) >> 2]++;
+#endif
 	aica_reg_write(a - 0x800000, v, 4);
 }
 void arm_write8(u32 a, u8 v)
 {
 	a &= 0x00FFFFFF;
 	if (a < 0x800000) { aica_ram[a] = v; return; }
+#ifdef ARM_DEBUG
 	arm_reg_writes[(a & 0xFFFF) >> 2]++;
+#endif
 	aica_reg_write(a - 0x800000, v, 1);
 }
 
@@ -385,7 +401,9 @@ static void one_sample(void)
 	for (int c = 0; c < 64; c++)
 		if (ch[c].on) voice(c, &ch[c], &l, &r);
 	int mvol = REG(0x2800) & 15;
-	double master = mvol ? pow(10.0, -((15 - mvol) * 3.0) / 20.0) : 0;
+	static double mtbl[16];
+	if (!mtbl[15]) for (int i = 1; i < 16; i++) mtbl[i] = pow(10.0, -((15 - i) * 3.0) / 20.0);
+	double master = mtbl[mvol];
 	l = (int)(l * master); r = (int)(r * master);
 	if (l > 32767) l = 32767; if (l < -32768) l = -32768;
 	if (r > 32767) r = 32767; if (r < -32768) r = -32768;

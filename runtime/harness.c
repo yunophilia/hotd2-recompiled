@@ -14,6 +14,7 @@
 #include <unistd.h>
 #include "sh4ctx.h"
 #include "funcs.h"
+#include "lookup.h"
 #include "coro.h"
 
 u8 *ram;
@@ -280,6 +281,21 @@ static void print_irq_state(void)
 static void stop(const char *why)
 {
 	fprintf(stderr, "stop: %s (hw accesses: %lu)\n", why, hw_count);
+#ifdef ARM_PROFILE
+	{
+		extern u32 arm_pc_hist[0x4000];
+		u64 total = 0;
+		for (int i = 0; i < 0x4000; i++) total += arm_pc_hist[i];
+		fprintf(stderr, "--- ARM hot PCs (of %llu instructions):", (unsigned long long)total);
+		for (int k = 0; k < 24; k++) {
+			int best = 0;
+			for (int i = 0; i < 0x4000; i++) if (arm_pc_hist[i] > arm_pc_hist[best]) best = i;
+			fprintf(stderr, " %04X:%.1f%%", best * 4, 100.0 * arm_pc_hist[best] / total);
+			arm_pc_hist[best] = 0;
+		}
+		fprintf(stderr, "\n");
+	}
+#endif
 #ifdef HOTD2_DIFF
 	void diff_summary(void);
 	diff_summary();
@@ -349,19 +365,15 @@ void trace_lowram(u32 a, int write, int size)
 /* HOTD2_INTERP_ALL=1: run everything in the interpreter (except the coroutine
  * restore, which must unwind host frames) to cross-check the recompiled code */
 static int interp_all = -1;
+#ifdef ARM_PROFILE
+u32 arm_pc_hist[0x4000];
+#endif
 
 void (*sh4_lookup(u32 target))(Sh4 *)
 {
 	if (interp_all < 0) interp_all = getenv("HOTD2_INTERP_ALL") != NULL;
 	if (interp_all && (target & 0x1FFFFFFF) != (CORO_RESTORE_ADDR & 0x1FFFFFFF)) return NULL;
-	u32 lo = 0, hi = func_count, t = target & 0x1FFFFFFF;
-	while (lo < hi) {
-		u32 mid = (lo + hi) / 2;
-		u32 a = func_table[mid].addr & 0x1FFFFFFF;
-		if (a == t) return func_table[mid].fn;
-		if (a < t) lo = mid + 1; else hi = mid;
-	}
-	return NULL;
+	return func_lookup(target);
 }
 
 void sh4_interp(Sh4 *c, u32 pc);

@@ -46,6 +46,16 @@ u32 hle_read(u32 addr, int size);
 void hle_write(u32 addr, u32 value, int size);
 /* Called for calls/jumps whose target is only known at run time. */
 void sh4_dispatch(Sh4 *c, u32 target);
+/* Recompiled function for a guest address, or NULL. */
+void (*sh4_lookup(u32 target))(Sh4 *);
+/* Indirect call (jsr/jmp @Rn) with a one-entry cache per call site: most sites
+ * always call the same function, e.g. HOTD2's frame delay loop. */
+#define CALL_IND(c, t) do { \
+	static u32 ic_t_; static void (*ic_f_)(Sh4 *); \
+	u32 t_ = (t); \
+	if (t_ != ic_t_ || !ic_f_) { ic_f_ = sh4_lookup(t_); ic_t_ = t_; } \
+	if (ic_f_) ic_f_(c); else sh4_dispatch((c), t_); \
+} while (0)
 /* Unrecompiled or unexpected code paths end up here. */
 void sh4_unimplemented(Sh4 *c, u32 pc, u16 op);
 
@@ -78,9 +88,17 @@ static inline void wr16(u32 a, u16 v)
 {
 	if (is_ram(a)) memcpy(ram + (a & RAM_MASK), &v, 2); else hle_write(a, v, 2);
 }
+/* store-queue buffers (0xE0000000-0xE3FFFFFF): HOTD2 streams every vertex
+ * through them, so 32-bit writes fill them inline; `pref` sends them on */
+extern u8 hle_sq_buf[2][32];
+
 static inline void wr32(u32 a, u32 v)
 {
-	if (is_ram(a)) memcpy(ram + (a & RAM_MASK), &v, 4); else hle_write(a, v, 4);
+	if (is_ram(a)) { memcpy(ram + (a & RAM_MASK), &v, 4); return; }
+#ifndef HOTD2_DIFF   /* the cross-check needs every non-RAM access to reach hle_write */
+	if ((a >> 26) == 0x38) { memcpy(&hle_sq_buf[(a >> 5) & 1][a & 0x1C], &v, 4); return; }
+#endif
+	hle_write(a, v, 4);
 }
 
 static inline float rdf(u32 a) { u32 v = rd32(a); float f; memcpy(&f, &v, 4); return f; }

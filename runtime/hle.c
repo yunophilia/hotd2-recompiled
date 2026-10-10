@@ -44,7 +44,8 @@ static inline u8 *vram_ptr(u32 p)
 
 /* SH-4 store queues: two 32-byte buffers at 0xE0000000-0xE3FFFFFF, flushed by
  * `pref` to the area selected by QACR0/QACR1 (0xFF000038/0xFF00003C). */
-static u8 sq_buf[2][32];
+u8 hle_sq_buf[2][32];
+#define sq_buf hle_sq_buf
 #define QACR(n) onchip[0][(0x38 + 4 * (n)) / 4]
 
 void hle_store_queue(Sh4 *c, u32 addr)

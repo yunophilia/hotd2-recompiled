@@ -380,7 +380,7 @@ class Gen:
                     direct = f"if (tgt == {hx(t)}) f_{t:08x}(c); else "
                 else:
                     direct = ""
-                out.append(f"\t{{ u32 tgt = c->r[{rn}]; c->pr = {hx(pc + 4)}; {slot} {direct}sh4_dispatch(c, tgt); }}")
+                out.append(f"\t{{ u32 tgt = c->r[{rn}]; c->pr = {hx(pc + 4)}; {slot} {direct}CALL_IND(c, tgt); }}")
             elif name == "bsrf":
                 out.append(f"\t{{ u32 tgt = {hx(pc + 4)} + c->r[{rn}]; c->pr = {hx(pc + 4)}; {slot} sh4_dispatch(c, tgt); }}")
             elif name == "rts":
@@ -392,7 +392,7 @@ class Gen:
             elif name == "jmp":
                 t = funcs.reg_literal(img, pc, f"r{rn}")
                 direct = f"if (tgt == {hx(t)}) {{ f_{t:08x}(c); return; }} " if t in self.fns else ""
-                out.append(f"\t{{ u32 tgt = c->r[{rn}]; {slot} {direct}sh4_dispatch(c, tgt); return; }}")
+                out.append(f"\t{{ u32 tgt = c->r[{rn}]; {slot} {direct}CALL_IND(c, tgt); return; }}")
                 prev_end = None
             elif name == "braf":
                 cases = " ".join(f"case {hx(t)}: goto L_{t:08x};"
