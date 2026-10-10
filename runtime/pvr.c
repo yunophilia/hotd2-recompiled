@@ -98,8 +98,9 @@ static void decode_vertex(DecodeState *d, const u8 *p, PvrVert *v)
 	case 10: scale_col(d->face, f32(p, 4), v->col); break;
 	case 11: v->u = f32(p, 4); v->v = f32(p, 5); packed(u32w(p, 6), v->col); packed(u32w(p, 7), v->ofs); break;
 	case 12: uv16(u32w(p, 4), &v->u, &v->v); packed(u32w(p, 6), v->col); packed(u32w(p, 7), v->ofs); break;
-	case 13: v->u = f32(p, 4); v->v = f32(p, 5); scale_col(d->face, f32(p, 6), v->col); scale_col(d->face_ofs, f32(p, 7), v->ofs); break;
-	case 14: uv16(u32w(p, 4), &v->u, &v->v); scale_col(d->face, f32(p, 6), v->col); scale_col(d->face_ofs, f32(p, 7), v->ofs); break;
+	/* two-volume intensity: word 7 is volume 1's intensity, not an offset colour */
+	case 13: v->u = f32(p, 4); v->v = f32(p, 5); scale_col(d->face, f32(p, 6), v->col); break;
+	case 14: uv16(u32w(p, 4), &v->u, &v->v); scale_col(d->face, f32(p, 6), v->col); break;
 	}
 }
 
@@ -138,6 +139,7 @@ int pvr_decode(const u8 *list, u32 len, PvrTriFn emit, void *user)
 {
 	DecodeState d;
 	memset(&d, 0, sizeof d);
+	for (int i = 0; i < 4; i++) d.face[i] = d.face_ofs[i] = 1;
 	int list_type = -1, count = 0;
 	for (u32 off = 0; off + 32 <= len; ) {
 		const u8 *p = list + off;
@@ -177,7 +179,9 @@ int pvr_decode(const u8 *list, u32 len, PvrTriFn emit, void *user)
 			d.vsize = vertex_bytes(d.vtype);
 			{
 				int col = (pcw >> 4) & 3, vol = (pcw >> 6) & 1, tex = (pcw >> 3) & 1, ofs = (pcw >> 2) & 1;
-				for (int i = 0; i < 4; i++) d.face[i] = d.face_ofs[i] = 1;
+				/* intensity mode 2 (col 3) reuses the face colours of the last mode-1 header */
+				if (col != 3)
+					for (int i = 0; i < 4; i++) d.face[i] = d.face_ofs[i] = 1;
 				if (!vol && col == 2 && tex && ofs) {          /* type 2: 64 bytes, face + offset colours */
 					floats_argb(p, 8, d.face);
 					floats_argb(p, 12, d.face_ofs);
