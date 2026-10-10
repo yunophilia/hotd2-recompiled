@@ -164,7 +164,7 @@ function run() {
 
 // JvsInput { u8 test; u16 buttons[2]; u16 gun_x[2], gun_y[2]; u8 offscreen[2]; u16 coins[2]; }
 const IN = { test: 0, buttons: 2, gunX: 6, gunY: 10, offscreen: 14, coins: 16 };
-const START = 0x8000, TRIGGER = 0x0200;
+const START = 0x8000, SERVICE = 0x4000, TRIGGER = 0x0200;
 function setupInput(canvas) {
 	const base = Module._web_input();
 	const u8 = (o) => Module.HEAPU8;
@@ -197,12 +197,14 @@ function setupInput(canvas) {
 		if (e.key === '5') set16(IN.coins, get16(IN.coins) + 2);   // one game's worth: the game needs 2 credits to start
 		if (e.key === '1' || e.key === 'Enter') { set16(IN.buttons, get16(IN.buttons) | START); startDown = performance.now(); }
 		if (e.key === '9') Module.HEAPU8[base + IN.test] = 1;
+		if (e.key === '0') set16(IN.buttons, get16(IN.buttons) | SERVICE);   // test menu: move the cursor
 		if (e.key === 'f' || e.key === 'F') toggleFullscreen();
 	});
 	window.addEventListener('keyup', (e) => {
 		if (e.key === '1' || e.key === 'Enter')
 			setTimeout(() => set16(IN.buttons, get16(IN.buttons) & ~START), Math.max(0, 100 - (performance.now() - startDown)));
 		if (e.key === '9') Module.HEAPU8[base + IN.test] = 0;
+		if (e.key === '0') set16(IN.buttons, get16(IN.buttons) & ~SERVICE);
 	});
 	void u8;
 }

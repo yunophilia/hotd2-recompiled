@@ -164,11 +164,35 @@ static void stop(const char *why);
 #include "jvs.h"
 static void scripted_input(u64 frame)
 {
-	const char *spec = getenv("HOTD2_INPUT");
-	for (const char *p = spec; p && *p; ) {
+	/* HOTD2_INPUT="frame:action,..." or "@file" for scripts too long for the environment */
+	static const char *spec;
+	static int loaded;
+	if (!loaded) {
+		loaded = 1;
+		spec = getenv("HOTD2_INPUT");
+		if (spec && spec[0] == '@') {
+			FILE *f = fopen(spec + 1, "rb");
+			char *buf = NULL;
+			if (f) {
+				fseek(f, 0, SEEK_END);
+				long n = ftell(f);
+				fseek(f, 0, SEEK_SET);
+				buf = calloc(1, (size_t)n + 1);
+				if (buf && fread(buf, 1, (size_t)n, f) != (size_t)n) buf[0] = 0;
+				fclose(f);
+			}
+			spec = buf;
+		}
+	}
+	/* entries are in frame order: keep a cursor at the first one not yet due */
+	static const char *cur;
+	if (!cur) cur = spec;
+	for (const char *p = cur; p && *p; ) {
 		u64 f = strtoull(p, NULL, 10);
 		const char *colon = strchr(p, ':');
 		const char *comma = strchr(p, ',');
+		if (f > frame) break;
+		if (f < frame) cur = comma ? comma + 1 : p + strlen(p);
 		if (colon && (!comma || colon < comma) && f == frame) {
 			const char *a = colon + 1;
 			int off = *a == '-';
@@ -178,6 +202,7 @@ static void scripted_input(u64 frame)
 			else if (!strncmp(a, "fire", 4)) jvs_input.buttons[0] = off ? jvs_input.buttons[0] & ~JVS_TRIGGER : jvs_input.buttons[0] | JVS_TRIGGER;
 			else if (!strncmp(a, "reload", 6)) jvs_input.offscreen[0] = !off;
 			else if (!strncmp(a, "test", 4)) jvs_input.test = !off;
+			else if (!strncmp(a, "service", 7)) jvs_input.buttons[0] = off ? jvs_input.buttons[0] & ~JVS_SERVICE : jvs_input.buttons[0] | JVS_SERVICE;
 			else if (!strncmp(a, "aim=", 4)) {
 				jvs_input.gun_x[0] = (u16)strtoul(a + 4, NULL, 10);
 				const char *sl = strchr(a, '/');

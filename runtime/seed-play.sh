@@ -23,7 +23,8 @@ for i in $(seq 1 "$iters"); do
 	[ -f missing.txt ] && grep -v "^00000000" missing.txt >> "$here/data/seeds.txt"
 	rm -f missing.txt
 	bash "$here/runtime/build-harness.sh" "$HOME/hotd2/roms/hotd2.zip" "$out" 2>&1 | grep -E "rror:"
-	HOTD2_INTERP=1 HOTD2_TRACE=0 HOTD2_FRAMES="$frames" HOTD2_INPUT="$script" timeout 3000 ./harness ic22.bin > run.log 2>&1
+	printf "%s" "$script" > input.txt
+	HOTD2_INTERP=1 HOTD2_TRACE=0 HOTD2_FRAMES="$frames" HOTD2_INPUT=@input.txt timeout 3000 ./harness ic22.bin > run.log 2>&1
 	echo "iter $i: $(grep "^stop" run.log | cut -c1-40) | $(grep "^--- frames" run.log | cut -c5-60) | new targets $(cat missing.txt 2>/dev/null | wc -l)"
 	[ -f missing.txt ] || break
 	if grep -q "^00000000" missing.txt; then echo "NULL CALL:"; cat missing.txt; break; fi
