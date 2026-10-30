@@ -1,0 +1,7 @@
+# Auto play settings shared by the chapter scripts.
+# Small flying objects (task 0C076BEC, 0C07A938) are only shot when close: shooting a whole
+# swarm in the distance spawns so many effects that the game's own vertex buffer overflows
+# (Kamui error 2, the game halts with a trap), so a careful player leaves them alone.
+auto avoid 0C07A938 40
+auto avoid 0C076BEC 40
+auto on

@@ -1,0 +1,6 @@
+# Quick smoke test (about a minute in the native harness): start a game and clear
+# chapter 1, boss included, with real input only.
+include start_game.tas
+until u32 mode == 5 and u32 submode == 2 timeout 30
+include auto_setup.tas
+include chapter1.inc

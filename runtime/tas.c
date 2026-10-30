@@ -32,6 +32,7 @@ static const struct { const char *name; u32 addr; } names[] = {
 	{ "hits", 0x0C3D0458 },      /* u32 shots that hit */
 	{ "ammo", 0x0C3D0444 },      /* u32 bullets left (player struct +36) */
 	{ "player", 0x0C3D0420 },    /* player 1 struct (256 bytes per player) */
+	{ "chapter", 0x0C3D0530 },   /* u32 chapter, 0-based */
 	{ "mode", 0x0C3D07B4 },      /* u32 main game mode */
 	{ "submode", 0x0C3D07B8 },
 	{ "bosshp", 0x0C3D11FC },    /* f32 boss health fraction */
@@ -353,12 +354,12 @@ static u32 parse_input(const char *s, const char **rest)
 }
 
 /* --- auto aim: shootable spheres from the game's own hit-test data --- */
-typedef struct { float sx, sy, depth, r, ax, ay; u32 obj, flags; } Cand;
+typedef struct { float sx, sy, depth, r, ax, ay; u32 obj, flags; int part, target; } Cand;   /* part -1: whole object */
 #define MAXCAND 512
 static Cand cands[MAXCAND];
 static int ncands;
 
-static void add_sphere(u32 obj, float x, float y, float z, float r, u32 flags)
+static void add_sphere(u32 obj, int part, float x, float y, float z, float r, u32 flags)
 {
 	if (ncands >= MAXCAND || !(z < -1.0f) || !(r > 0)) return;
 	float F = mf(0x0C403438);
@@ -369,7 +370,9 @@ static void add_sphere(u32 obj, float x, float y, float z, float r, u32 flags)
 	c->depth = -z;
 	c->r = F * r / -z;
 	c->obj = obj;
+	c->part = part;
 	c->flags = flags;
+	c->target = 1;
 }
 
 static void walk_parts(u32 obj, u32 node, int depth)
@@ -380,13 +383,15 @@ static void walk_parts(u32 obj, u32 node, int depth)
 	if (idx >= 0 && idx < 128 && m32(part)) {
 		u32 pf = m32(part + 116);
 		if (!(pf & 0x10))   /* bit 4 set: tested against a mesh instead */
-			add_sphere(obj, mf(part + 104), mf(part + 108), mf(part + 112), mf(part + 120), pf);
+			add_sphere(obj, idx, mf(part + 104), mf(part + 108), mf(part + 112), mf(part + 120), pf);
 	}
 	s16 kids = (s16)m16(node + 22);
 	for (int k = 0; k < kids && k < 64; k++)
 		walk_parts(obj, m32(node + 24 + 4 * k), depth + 1);
 }
 
+/* every sphere the game's hit test would try this frame; `target` marks the ones worth shooting
+ * (the others still block the ray: the game takes the nearest sphere it hits) */
 static void gather(void)
 {
 	ncands = 0;
@@ -396,15 +401,15 @@ static void gather(void)
 		u32 obj = m32(0x0C146D70 + i * 20);
 		if (!mem_ok(obj, 0x2000)) continue;
 		u32 fl = m32(obj + 48);
+		if (fl & 0x10) continue;      /* tested against a mesh (scenery pieces): not modelled */
 		float near = -1;
 		for (int k = 0; k < navoid; k++) if (m32(obj) == avoid[k].task) near = avoid[k].depth;
-		if (near == 0) continue;
-		if (fl & 0x10) continue;      /* mesh-tested objects (scenery pieces) */
-		if (fl & 0x100) continue;     /* hits are not counted (dying) */
-		/* single-sphere objects with bit 31 (thrown weapons, props) take one hit; once shot
-		 * (bit 3 pending, bits 1-2 by a player) they stay shootable but nothing more happens */
-		if ((fl & 0x80000000u) && (fl & 0x0E)) continue;
-		int parts = 0;
+		int target = near != 0 &&
+		             !(fl & 0x100) &&  /* hits are not counted (dying) */
+		             /* single-sphere objects with bit 31 (thrown weapons, props) take one hit; once
+		              * shot (bit 3 pending, bits 1-2 by a player) nothing more happens */
+		             !((fl & 0x80000000u) && (fl & 0x0E));
+		int first = ncands, parts = 0;
 		if (fl & 0x80) {
 			u32 root = m32(0x0CB59DD4 + 4 * (u32)(s32)(s16)m16(obj + 0x1F0));
 			if (mem_ok(root, 28) && (s16)m16(root + 22) > 0 && !(fl & 0x8000)) {
@@ -413,82 +418,135 @@ static void gather(void)
 			}
 		}
 		if (!parts)
-			add_sphere(obj, mf(obj + 108), mf(obj + 112), mf(obj + 116), mf(obj + 0x120), fl);
-		if (near > 0)
-			for (int k = ncands - 1; k >= 0 && cands[k].obj == obj; k--)
-				if (cands[k].depth > near) cands[k] = cands[--ncands];
+			add_sphere(obj, -1, mf(obj + 108), mf(obj + 112), mf(obj + 116), mf(obj + 0x120), fl);
+		for (int k = first; k < ncands; k++)
+			cands[k].target = target && !(near > 0 && cands[k].depth > near);
 	}
 }
 
+/* What shots achieved, per object part: a shot makes progress when the hit counter goes up or
+ * the boss health goes down. Parts whose shots stop making progress (dying enemies, armour,
+ * a boss away from its weak point) are dropped for a while; parts that worked are preferred. */
+#define NNOTES 256
+static struct { u32 obj; int part; int misses, wins; u64 bad_until, seen; } notes[NNOTES];
 
-/* objects that took shots without the hit counter moving (dead, dying, or not hurt by bullets)
- * get a lower priority for a while */
-#define NIGNORE 64
-static struct { u32 obj; u64 until; } ignored[NIGNORE];
-static u32 strike_obj;
-static int strikes;
-
-static int is_ignored(u32 obj)
+static int note_find(u32 obj, int part, int create)
 {
-	for (int i = 0; i < NIGNORE; i++)
-		if (ignored[i].obj == obj && ignored[i].until > now) return 1;
+	int old = 0;
+	for (int i = 0; i < NNOTES; i++) {
+		if (notes[i].obj == obj && notes[i].part == part) return i;
+		if (notes[i].seen < notes[old].seen) old = i;
+	}
+	if (!create) return -1;
+	memset(&notes[old], 0, sizeof notes[old]);
+	notes[old].obj = obj;
+	notes[old].part = part;
+	notes[old].seen = now;
+	return old;
+}
+
+static int part_bad(const Cand *c)
+{
+	int i = note_find(c->obj, c->part, 0);
+	return i >= 0 && notes[i].bad_until > now;
+}
+
+static int part_wins(const Cand *c)
+{
+	int i = note_find(c->obj, c->part, 0);
+	return i >= 0 ? notes[i].wins : 0;
+}
+
+static int auto_part = -1;
+
+/* shots are seen as the magazine count dropping (the shot counter stops during boss fights) */
+static void score_shots(void)
+{
+	static struct { u32 obj; int part; u64 frame; u32 hits; float boss; } pending[8];
+	static int npending;
+	static u32 last_ammo;
+	u32 ammo = m32(0x0C3D0444), hits = m32(0x0C3D0458);
+	float boss = mf(0x0C3D11FC);
+	static u32 prev_hits;
+	static float prev_boss;
+	if (ammo + 1 == last_ammo && auto_have && npending < 8) {
+		pending[npending].obj = auto_last_obj;
+		pending[npending].part = auto_part;
+		pending[npending].frame = now;
+		pending[npending].hits = prev_hits;
+		pending[npending].boss = prev_boss;
+		npending++;
+	}
+	for (int k = 0; k < npending; ) {
+		if (now < pending[k].frame + 3) { k++; continue; }
+		int won = hits > pending[k].hits || boss < pending[k].boss - 1e-6f;
+		int i = note_find(pending[k].obj, pending[k].part, 1);
+		notes[i].seen = now;
+		if (won) { notes[i].wins++; notes[i].misses = 0; notes[i].bad_until = 0; }
+		else if (++notes[i].misses >= ignore_after) { notes[i].misses = 0; notes[i].bad_until = now + (u64)ignore_frames; }
+		pending[k] = pending[--npending];
+	}
+	last_ammo = ammo;
+	prev_hits = hits;
+	prev_boss = boss;
+}
+
+/* can the gun hit this sphere? Sets the aim point: the centre, or a point further out, that is
+ * on screen (the gun reaches ±300 by ±220) and not covered by a nearer sphere. */
+static int reachable(Cand *c)
+{
+	static const float offs[][2] = { { 0, 0 }, { 0, .5f }, { 0, -.5f }, { .5f, 0 }, { -.5f, 0 },
+	                                 { .35f, .35f }, { -.35f, .35f }, { .35f, -.35f }, { -.35f, -.35f } };
+	float lim_x = (639 - cal_cx) * fabsf(cal_kx) - 2, lim_y = (479 - cal_cy) * fabsf(cal_ky) - 2;
+	for (unsigned k = 0; k < sizeof offs / sizeof offs[0]; k++) {
+		float x = c->sx + offs[k][0] * c->r, y = c->sy + offs[k][1] * c->r;
+		x = fmaxf(-lim_x, fminf(lim_x, x));
+		y = fmaxf(-lim_y, fminf(lim_y, y));
+		float dx = x - c->sx, dy = y - c->sy;
+		if (dx * dx + dy * dy > 0.5f * c->r * c->r) continue;
+		int covered = 0;
+		for (int j = 0; j < ncands && !covered; j++) {
+			const Cand *o = &cands[j];
+			if (o == c || o->depth >= c->depth) continue;
+			float ex = x - o->sx, ey = y - o->sy;
+			if (ex * ex + ey * ey < o->r * o->r) covered = 1;
+		}
+		if (covered) continue;
+		c->ax = x;
+		c->ay = y;
+		return 1;
+	}
 	return 0;
 }
 
-static void ignore(u32 obj, int frames)
-{
-	int slot = 0;
-	for (int i = 0; i < NIGNORE; i++) {
-		if (ignored[i].obj == obj || ignored[i].until <= now) { slot = i; break; }
-		if (ignored[i].until < ignored[slot].until) slot = i;
-	}
-	ignored[slot].obj = obj;
-	ignored[slot].until = now + (u64)frames;
-}
-
-/* watch the game's counters: a counted shot at our target that did not add a hit is a strike */
-static void score_shots(void)
-{
-	static u32 last_shots, last_hits;
-	u32 sh = m32(0x0C3D0454), hi = m32(0x0C3D0458);
-	if (hi != last_hits) strikes = 0;
-	else if (sh != last_shots && auto_have) {
-		if (strike_obj != auto_last_obj) { strike_obj = auto_last_obj; strikes = 0; }
-		if (++strikes >= ignore_after) { ignore(auto_last_obj, ignore_frames); strikes = 0; }
-	}
-	last_shots = sh;
-	last_hits = hi;
-}
-
-/* can the gun reach this sphere? sets the aim point (the centre, or the nearest point on the
- * screen edge while that is still well inside the sphere) */
-static int reachable(Cand *c)
-{
-	float lim_x = (639 - cal_cx) * fabsf(cal_kx) - 2, lim_y = (479 - cal_cy) * fabsf(cal_ky) - 2;
-	c->ax = fmaxf(-lim_x, fminf(lim_x, c->sx));
-	c->ay = fmaxf(-lim_y, fminf(lim_y, c->sy));
-	float dx = c->ax - c->sx, dy = c->ay - c->sy;
-	return dx * dx + dy * dy <= 0.5f * c->r * c->r;
-}
-
-/* pick a target: the nearest object (by its nearest sphere), keeping the one we are on while it
- * lasts; on that object aim at the topmost sphere (for people, the head) */
+/* pick a target: the nearest object (by its nearest sphere), staying a little longer on the one
+ * we are on, and leaving objects whose every part stopped making progress until nothing else is
+ * in reach. On that object: the part that made progress most often, else the topmost one (for
+ * people, the head) not dropped. */
 static const Cand *pick(void)
 {
 	u32 obj = 0;
 	float bs = 0;
-	for (int i = 0; i < ncands; i++) {
-		Cand *c = &cands[i];
-		if (!reachable(c)) continue;
-		/* nearest first; stay on the current target, avoid ones that stopped taking hits */
-		float score = c->depth * (c->obj == auto_last_obj ? 0.5f : 1.0f) * (is_ignored(c->obj) ? 4.0f : 1.0f);
-		if (!obj || score < bs) { obj = c->obj; bs = score; }
-	}
+	for (int pass = 0; pass < 2 && !obj; pass++)
+		for (int i = 0; i < ncands; i++) {
+			Cand *c = &cands[i];
+			if (!c->target || !reachable(c)) continue;
+			int all_bad = 1;
+			for (int j = 0; j < ncands && all_bad; j++)
+				if (cands[j].obj == c->obj && cands[j].target && !part_bad(&cands[j])) all_bad = 0;
+			if (all_bad && pass == 0) continue;
+			float score = c->depth * (c->obj == auto_last_obj ? 0.75f : 1.0f);
+			if (!obj || score < bs) { obj = c->obj; bs = score; }
+		}
 	const Cand *best = NULL;
+	int best_bad = 0, best_wins = 0;
 	for (int i = 0; i < ncands; i++) {
 		Cand *c = &cands[i];
-		if (c->obj != obj || !reachable(c)) continue;
-		if (!best || c->sy > best->sy) best = c;
+		if (c->obj != obj || !c->target || !reachable(c)) continue;
+		int bad = part_bad(c), wins = part_wins(c);
+		int better = !best || (best_bad && !bad) ||
+		             (bad == best_bad && (wins > best_wins || (wins == best_wins && c->sy > best->sy)));
+		if (better) { best = c; best_bad = bad; best_wins = wins; }
 	}
 	return best;
 }
@@ -503,26 +561,29 @@ static void auto_step(u32 *mask, int *x, int *y)
 		if (auto_debug && !shot_name[0]) snprintf(shot_name, sizeof shot_name, "life_%llu.ppm", (unsigned long long)now);
 	}
 	last_lives = lives;
+	score_shots();
 	if (auto_reload > 0) {
 		auto_reload--;
 		if (auto_reload >= 4) *mask |= IN_RELOAD;
 		return;
 	}
-	score_shots();
 	gather();
 	const Cand *c = pick();
 	if (auto_debug < 0) {
-		/* one line per shot the game counted: where the gun was against the target we chose */
-		static u32 last_shots, last_hits;
-		u32 sh = m32(0x0C3D0454), hi = m32(0x0C3D0458);
-		if (sh != last_shots) {
+		/* one line per shot (magazine count dropping): where the gun was against the target */
+		static u32 last_ammo, last_hits;
+		static float last_boss;
+		u32 hi = m32(0x0C3D0458);
+		float bh = mf(0x0C3D11FC);
+		if (ammo + 1 == last_ammo) {
 			u32 rec = 0x0C14A538 + 60 * m32(0x0C149548 + 4);   /* nearest hit record of the last test */
-			logmsg("shot %u: gun %d,%d  target %08X (task %08X flags %08X) %.0f,%.0f r %.0f  hits %+d  record %08X/%08X flags %08X n %u",
-			       sh, (s16)m16(0x0C3D17D0), (s16)m16(0x0C3D17D2), auto_last_obj, m32(auto_last_obj), m32(auto_last_obj + 48), auto_sx, auto_sy, c ? c->r : 0,
-			       (int)(hi - last_hits), m32(rec + 36), m32(rec + 40), m32(rec + 44), m32(0x0C14E104));
+			logmsg("shot: gun %d,%d  target %08X part %d (task %08X flags %08X) %.0f,%.0f  hits %+d boss %.3f  record %08X/%08X flags %08X",
+			       (s16)m16(0x0C3D17D0), (s16)m16(0x0C3D17D2), auto_last_obj, auto_part, m32(auto_last_obj), m32(auto_last_obj + 48),
+			       auto_sx, auto_sy, (int)(hi - last_hits), bh - last_boss, m32(rec + 36), m32(rec + 40), m32(rec + 44));
 		}
-		last_shots = sh;
+		last_ammo = ammo;
 		last_hits = hi;
+		last_boss = bh;
 	}
 	if (auto_debug && now % auto_debug == 0) {
 		logmsg("auto: %d candidates, target %s ammo %u", ncands, c ? "yes" : "no", ammo);
@@ -543,6 +604,7 @@ static void auto_step(u32 *mask, int *x, int *y)
 	}
 	if (!c) { auto_have = 0; auto_fire_phase = 0; return; }
 	auto_last_obj = c->obj;
+	auto_part = c->part;
 	auto_have = 1;
 	auto_sx = c->ax;
 	auto_sy = c->ay;
