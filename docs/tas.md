@@ -134,7 +134,8 @@ hex), e.g. `u32 [0C3D1284]+48 == 0`. Several conditions join left to right with
   (for people, the head). Skipped: objects flagged `0x100` (hits no longer count:
   dying), bit-31 objects already shot (thrown weapons and props take one hit), and
   objects listed with `auto avoid` (always: innocents, task `0C092DE6`; shooting one
-  costs a life and shows HOLD YOUR FIRE!).
+  costs a life). Auto play keeps firing through HOLD YOUR FIRE! phases (no-shoot
+  intros, such as before a boss fight); those shots do nothing.
 - Progress learning: a shot is seen as the magazine (`u32 0C3D0444`) dropping by one
   (the shot counter stops during boss fights). It made progress when, within 3
   frames, the hit counter went up or the boss health (`f32 0C3D11FC`) went down. After
