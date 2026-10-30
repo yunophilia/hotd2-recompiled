@@ -99,7 +99,10 @@ export class PvrRenderer {
 			gl.vertexAttribPointer(loc, size, gl.FLOAT, false, stride, off * 4);
 		};
 		attr('a_pos', 3, 0); attr('a_uv', 2, 3); attr('a_col', 4, 5); attr('a_ofs', 4, 9);
-		this.textures = [];   // slot -> { tex, version }
+		this.ibo = gl.createBuffer();   // depth-sorted translucent triangles (drawSorted)
+		this.sort = null;               // its scratch arrays, grown as needed
+		this.cache = {};                // GL state already set this frame (setCall)
+		this.textures = [];   // slot -> { tex, version, and the filter / wrap last set on it }
 		this.lastSeq = -1;
 		this.frames = 0;
 	}
@@ -158,6 +161,112 @@ export class PvrRenderer {
 		gl.uniform2fv(this.u.u_fogTable, t);
 	}
 
+	// Render state for one draw call (c: word index of its GlCall) in the given pass. Anything
+	// already set this frame is skipped: sorted translucent triangles switch calls often.
+	setCall(c, pass, ptRef) {
+		const gl = this.gl, M = this.M, H = M.HEAPU32, k = this.cache;
+		const isp = H[c + 1], tsp = H[c + 2];
+		const tex = M.HEAP32[c + 6];
+		const textured = isp & 1 && tex >= 0 ? 1 : 0;
+		const blend = pass === 2 ? (tsp >>> 26) & 63 : -1;   // source factor in bits 3-5, destination in 0-2
+		if (k.blend !== blend) {
+			k.blend = blend;
+			if (blend < 0) gl.disable(gl.BLEND);
+			else {
+				gl.enable(gl.BLEND);
+				gl.blendFunc(this.blendFactor(blend >> 3, true), this.blendFactor(blend & 7, false));
+			}
+		}
+		const dfunc = pass === 2 ? gl.LEQUAL : this.depthFunc((isp >>> 29) & 7);
+		const dmask = pass !== 2 && !((isp >>> 26) & 1);
+		if (k.dfunc !== dfunc) { k.dfunc = dfunc; gl.depthFunc(dfunc); }
+		if (k.dmask !== dmask) { k.dmask = dmask; gl.depthMask(dmask); }
+		this.uniform('u_textured', textured);
+		this.uniform('u_offset', (isp >> 1) & 1);
+		this.uniform('u_shade', (tsp >>> 6) & 3);
+		this.uniform('u_useAlpha', (tsp >>> 20) & 1);
+		this.uniform('u_ignoreTexAlpha', (tsp >>> 19) & 1);
+		this.uniform('u_ptRef', pass === 4 ? ptRef : -1, true);
+		this.uniform('u_fogMode', (tsp >>> 22) & 3);
+		if (textured) {
+			if (k.tex !== tex) { k.tex = tex; this.texture(tex); }
+			const t = this.textures[tex];
+			const filter = (tsp >>> 13) & 3 ? gl.LINEAR : gl.NEAREST;
+			const wrap = (clamp, flip) => clamp ? gl.CLAMP_TO_EDGE : flip ? gl.MIRRORED_REPEAT : gl.REPEAT;
+			const ws = wrap((tsp >>> 16) & 1, (tsp >>> 18) & 1), wt = wrap((tsp >>> 15) & 1, (tsp >>> 17) & 1);
+			if (t.filter !== filter) {
+				t.filter = filter;
+				gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+				gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+			}
+			if (t.ws !== ws) { t.ws = ws; gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, ws); }
+			if (t.wt !== wt) { t.wt = wt; gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wt); }
+		}
+	}
+
+	uniform(name, v, float) {
+		if (this.cache[name] === v) return;
+		this.cache[name] = v;
+		if (float) this.gl.uniform1f(this.u[name], v);
+		else this.gl.uniform1i(this.u[name], v);
+	}
+
+	// Translucent polygons are auto-sorted unless the frame is in pre-sort mode: ISP_FEED_CFG
+	// bit 0 with type-1 region headers. Type-2 headers (FPU_PARAM_CFG bit 21) carry the flag per
+	// tile in the region array in VRAM; HOTD2 uses them and leaves it clear in every frame
+	// checked across the attract loop, so they count as auto-sort.
+	autosort() {
+		const M = this.M;
+		return ((M._web_reg(0x005F807C) >>> 21) & 1) === 1 || !(M._web_reg(0x005F8098) & 1);
+	}
+
+	// In auto-sort mode the PVR blends each pixel's translucent surfaces back to front, whatever
+	// order the game listed them in, and HOTD2 relies on it: hair, foliage, chains, blood and the
+	// zombies that lunge at the camera are all translucent, listed in any order. Drawn as listed,
+	// a far chandelier or the back of a zombie's own hair painted over its face. Sort the triangles
+	// by mean depth instead, farthest first, ties in list order: the usual stand-in for the
+	// per-pixel sort. On harness dumps of attract and play, about nine in ten of the pixels it
+	// changes move to what a per-pixel sort of the same frame gives.
+	drawSorted(vdata, calls, ncalls, ptRef) {
+		const gl = this.gl, H = this.M.HEAPU32;
+		let n = 0;
+		for (let i = 0; i < ncalls; i++) if (H[calls + i * 7] === 2) n += H[calls + i * 7 + 5] / 3;
+		if (!n) return;
+		if (!this.sort || this.sort.key.length < n) {
+			const cap = Math.max(n, 2 * (this.sort ? this.sort.key.length : 1024));
+			this.sort = { key: new Float32Array(cap), call: new Uint32Array(cap), vert: new Uint32Array(cap),
+				order: new Uint32Array(cap), idx: new Uint32Array(cap * 3) };
+		}
+		const { key, call, vert, idx } = this.sort;
+		let t = 0;
+		for (let i = 0; i < ncalls; i++) {
+			const c = calls + i * 7;
+			if (H[c] !== 2) continue;
+			for (let v = H[c + 4], end = v + H[c + 5]; v < end; v += 3, t++) {
+				key[t] = vdata[v * 13 + 2] + vdata[v * 13 + 15] + vdata[v * 13 + 28];   // three vertices' z = 1/w: smaller is farther
+				call[t] = c;
+				vert[t] = v;
+			}
+		}
+		const order = this.sort.order.subarray(0, n);
+		for (let j = 0; j < n; j++) order[j] = j;
+		order.sort((a, b) => key[a] - key[b] || a - b);
+		for (let j = 0; j < n; j++) {
+			const v = vert[order[j]];
+			idx[3 * j] = v; idx[3 * j + 1] = v + 1; idx[3 * j + 2] = v + 2;
+		}
+		gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.ibo);
+		gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx.subarray(0, 3 * n), gl.STREAM_DRAW);
+		for (let j = 0; j < n; ) {                 // one draw per run of triangles from the same call
+			const c = call[order[j]];
+			let e = j + 1;
+			while (e < n && call[order[e]] === c) e++;
+			this.setCall(c, 2, ptRef);
+			gl.drawElements(gl.TRIANGLES, 3 * (e - j), gl.UNSIGNED_INT, 12 * j);
+			j = e;
+		}
+	}
+
 	// Draw the latest frame if it changed; returns true when something was drawn.
 	draw() {
 		const gl = this.gl, M = this.M;
@@ -176,46 +285,21 @@ export class PvrRenderer {
 		gl.useProgram(this.prog);
 		gl.bindVertexArray(this.vao);
 		gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
-		gl.bufferData(gl.ARRAY_BUFFER, M.HEAPF32.slice(verts >> 2, (verts >> 2) + nverts * 13), gl.STREAM_DRAW);
+		const vdata = M.HEAPF32.slice(verts >> 2, (verts >> 2) + nverts * 13);
+		gl.bufferData(gl.ARRAY_BUFFER, vdata, gl.STREAM_DRAW);
 		gl.enable(gl.DEPTH_TEST);
 		gl.uniform1i(this.u.u_tex, 0);
 		gl.activeTexture(gl.TEXTURE0);
 		const ptRef = (M._web_reg(0x005F811C) & 0xFF) / 255;
 		this.setFog();
+		this.cache = {};
 		for (const pass of [0, 4, 2]) {            // opaque, punch-through, translucent
+			if (pass === 2 && this.autosort()) { this.drawSorted(vdata, calls, ncalls, ptRef); continue; }
 			for (let i = 0; i < ncalls; i++) {
 				const c = calls + i * 7;
 				if (H[c] !== pass) continue;
-				const isp = H[c + 1], tsp = H[c + 2], first = H[c + 4], count = H[c + 5];
-				const tex = M.HEAP32[c + 6];
-				const textured = isp & 1, offset = (isp >> 1) & 1;
-				if (pass === 2) {
-					gl.enable(gl.BLEND);
-					gl.blendFunc(this.blendFactor((tsp >>> 29) & 7, true), this.blendFactor((tsp >>> 26) & 7, false));
-					gl.depthFunc(gl.LEQUAL);
-					gl.depthMask(false);
-				} else {
-					gl.disable(gl.BLEND);
-					gl.depthFunc(this.depthFunc((isp >>> 29) & 7));
-					gl.depthMask(!((isp >>> 26) & 1));
-				}
-				gl.uniform1i(this.u.u_textured, textured && tex >= 0 ? 1 : 0);
-				gl.uniform1i(this.u.u_offset, offset);
-				gl.uniform1i(this.u.u_shade, (tsp >>> 6) & 3);
-				gl.uniform1i(this.u.u_useAlpha, (tsp >>> 20) & 1);
-				gl.uniform1i(this.u.u_ignoreTexAlpha, (tsp >>> 19) & 1);
-				gl.uniform1f(this.u.u_ptRef, pass === 4 ? ptRef : -1);
-				gl.uniform1i(this.u.u_fogMode, (tsp >>> 22) & 3);
-				if (textured && tex >= 0) {
-					this.texture(tex);
-					const filter = (tsp >>> 13) & 3 ? gl.LINEAR : gl.NEAREST;
-					gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
-					gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
-					const wrap = (clamp, flip) => clamp ? gl.CLAMP_TO_EDGE : flip ? gl.MIRRORED_REPEAT : gl.REPEAT;
-					gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrap((tsp >>> 16) & 1, (tsp >>> 18) & 1));
-					gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrap((tsp >>> 15) & 1, (tsp >>> 17) & 1));
-				}
-				gl.drawArrays(gl.TRIANGLES, first, count);
+				this.setCall(c, pass, ptRef);
+				gl.drawArrays(gl.TRIANGLES, H[c + 4], H[c + 5]);
 			}
 		}
 		gl.depthMask(true);
