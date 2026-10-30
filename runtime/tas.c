@@ -132,6 +132,7 @@ static float auto_sx, auto_sy;
 static float cal_cx = 320.0f, cal_cy = 240.0f, cal_kx = 300.0f / 320, cal_ky = -220.0f / 240;
 
 static int auto_debug;
+static int auto_skip;               /* tap start while nothing is in reach (skips cutscenes) */
 static int ignore_after = 2, ignore_frames = 90;
 /* objects by task function (object word 0) that are only shot once nearer than `depth`;
  * depth 0: never (innocents: shooting one costs a life) */
@@ -602,7 +603,12 @@ static void auto_step(u32 *mask, int *x, int *y)
 		auto_reload--;
 		return;
 	}
-	if (!c) { auto_have = 0; auto_fire_phase = 0; return; }
+	if (!c) {
+		auto_have = 0;
+		auto_fire_phase = 0;
+		if (auto_skip && now % 30 < 3) *mask |= IN_START;
+		return;
+	}
 	auto_last_obj = c->obj;
 	auto_part = c->part;
 	auto_have = 1;
@@ -714,6 +720,7 @@ static int next_command(void)
 			if (!strncmp(a, "on", 2)) auto_on = 1;
 			else if (!strncmp(a, "off", 3)) { auto_on = 0; auto_reload = 0; }
 			else if (!strncmp(a, "debug", 5)) auto_debug = atoi(a + 5);
+			else if (!strncmp(a, "skip", 4)) auto_skip = strncmp(skipws(a + 4), "off", 3) != 0;
 			else if (!strncmp(a, "avoid", 5)) {
 				if (navoid >= 32) die(2, "too many avoid entries");
 				char *e;
@@ -721,7 +728,7 @@ static int next_command(void)
 				avoid[navoid++].depth = strtof(e, NULL);
 			} else if (!strncmp(a, "ignore", 6)) {
 				if (sscanf(a + 6, "%d %d", &ignore_after, &ignore_frames) != 2) die(2, "auto ignore SHOTS FRAMES");
-			} else die(2, "auto on|off|debug N|ignore SHOTS FRAMES");
+			} else die(2, "auto on|off|skip [off]|avoid TASK [DEPTH]|debug N|ignore SHOTS FRAMES");
 			continue;
 		} else if (!strcmp(cmd, "calibrate")) {
 			if (sscanf(a, "%f %f %f %f", &cal_cx, &cal_cy, &cal_kx, &cal_ky) != 4) die(2, "calibrate CX CY KX KY");

@@ -68,6 +68,11 @@ Current result of `full_run.tas` (all checks pass, exit 0):
 
 Lives go up as well as down: rescuing people gives extra lives.
 
+With `auto skip` added to `auto_setup.tas` the same run skips the cutscenes and ends at
+frame 84721 (ending at 76411, 3 lives left, all checks pass). The scripts leave it off:
+the cutscenes are part of what the run tests (scene scripts, rendering), and watching
+them leaves more lives in hand.
+
 ## Script language
 
 One command per line; `#` starts a comment. Times are seconds (`1.5`) or frames
@@ -89,6 +94,7 @@ commands take time; everything else is instant.
 | `until COND [and/or COND...] [mash INPUT] [timeout T]` | wait until the condition holds (default timeout 60 s; a timeout fails the run with exit code 3); `mash` presses INPUT while waiting |
 | `check COND [msg TEXT]` | log PASS or FAIL without waiting; any FAIL makes the exit code 1 |
 | `auto on` / `auto off` | auto play: aim at and shoot enemies, reload when empty (see below) |
+| `auto skip` / `auto skip off` | while auto play has nothing in reach, tap start every half second to skip cutscenes |
 | `auto avoid TASK [DEPTH]` | objects whose task function is TASK (hex) are not shot, or only once nearer than DEPTH |
 | `auto ignore SHOTS FRAMES` | drop a part for FRAMES after SHOTS shots at it made no progress (default 2, 90) |
 | `auto debug N` | log auto play's view every N frames; `-1`: one line per shot and per life lost |
