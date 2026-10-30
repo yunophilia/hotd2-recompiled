@@ -1,19 +1,3 @@
-From 421e59dc934adb367367cbaef2303b2e71e4f0fd Mon Sep 17 00:00:00 2001
-From: =?UTF-8?q?Ivan=20H=2E=20=F0=9F=8F=B3=EF=B8=8F=E2=80=8D=F0=9F=8C=88?=
- =?UTF-8?q?=F0=9F=8F=B3=EF=B8=8F=E2=80=8D=E2=9A=A7=EF=B8=8F?=
- <ivankun16.5@gmail.com>
-Date: Wed, 7 Oct 2026 21:21:53 -0700
-Subject: [PATCH 2/2] Emscripten/wasm build: CPU_GENERIC, no curl/DreamLink,
- SDL2 port, pthread link flags
-
----
- CMakeLists.txt                | 21 ++++++++++++++++++---
- core/build.h                  |  4 ++++
- core/hw/sh4/sh4_core_regs.cpp |  2 ++
- core/linux/context.cpp        |  2 ++
- core/oslib/http_client.cpp    | 11 ++++++++++-
- 5 files changed, 36 insertions(+), 4 deletions(-)
-
 diff --git a/CMakeLists.txt b/CMakeLists.txt
 index c5ac6f6..a3ff648 100644
 --- a/CMakeLists.txt
@@ -67,6 +51,22 @@ index c5ac6f6..a3ff648 100644
  			find_package(CURL REQUIRED)
  			target_link_libraries(${PROJECT_NAME} PRIVATE CURL::libcurl)
  		endif()
+diff --git a/core/audio/audiostream.cpp b/core/audio/audiostream.cpp
+index 3799393..52f3be8 100644
+--- a/core/audio/audiostream.cpp
++++ b/core/audio/audiostream.cpp
+@@ -50,6 +50,11 @@ AudioBackend *AudioBackend::getBackend(const std::string& slug)
+ 
+ void WriteSample(s16 r, s16 l)
+ {
++	// hotd2-web: raw 44.1 kHz stereo dump of the AICA output for comparison (HOTD2_PCM=file)
++	static FILE *pcm;
++	static bool checked;
++	if (!checked) { checked = true; if (const char *f = getenv("HOTD2_PCM")) pcm = fopen(f, "wb"); }
++	if (pcm) { s16 lr[2] = { l, r }; fwrite(lr, 2, 2, pcm); }
+ 	Buffer[writePtr].r = r * config::AudioVolume.dbPower();
+ 	Buffer[writePtr].l = l * config::AudioVolume.dbPower();
+ 
 diff --git a/core/build.h b/core/build.h
 index 6ea5355..90bbb8a 100755
 --- a/core/build.h
@@ -89,6 +89,66 @@ index 6ea5355..90bbb8a 100755
  #else
  	#error Unsupported architecture
  #endif
+diff --git a/core/emulator.cpp b/core/emulator.cpp
+index 25e685b..3dfada3 100644
+--- a/core/emulator.cpp
++++ b/core/emulator.cpp
+@@ -21,6 +21,7 @@
+ #include "stdclass.h"
+ #include "cfg/option.h"
+ #include "hw/aica/aica_if.h"
++#include "hw/aica/aica_mem.h"
+ #include "imgread/common.h"
+ #include "hw/naomi/naomi_cart.h"
+ #include "reios/reios.h"
+@@ -40,6 +41,7 @@
+ #include "network/net_handshake.h"
+ #include "serialize.h"
+ #include "hw/pvr/pvr.h"
++#include "hw/pvr/pvr_mem.h"
+ #include "profiler/fc_profiler.h"
+ #include "oslib/storage.h"
+ #include "wsi/context.h"
+@@ -1083,8 +1085,39 @@ bool Emulator::render()
+ 	return rend_single_frame(true); // FIXME stop flag?
+ }
+ 
++// hotd2-web: dump main RAM / VRAM at chosen vblanks (HOTD2_DUMP_FRAMES=600,1800 HOTD2_DUMP_DIR=/path)
++static void hotd2DumpHook()
++{
++	static u64 frame;
++	static std::vector<u64> frames;
++	static const char *dir;
++	static bool init;
++	if (!init)
++	{
++		init = true;
++		dir = getenv("HOTD2_DUMP_DIR");
++		if (const char *f = getenv("HOTD2_DUMP_FRAMES"))
++			for (const char *c = f; *c; c = strchr(c, ',') ? strchr(c, ',') + 1 : c + strlen(c))
++				frames.push_back(strtoull(c, nullptr, 10));
++	}
++	frame++;
++	if (dir == nullptr || std::find(frames.begin(), frames.end(), frame) == frames.end())
++		return;
++	auto dump = [&](const char *name, u8 *p, size_t sz) {
++		std::string path = std::string(dir) + "/" + name + "_" + std::to_string(frame) + ".bin";
++		if (FILE *fp = fopen(path.c_str(), "wb")) { fwrite(p, 1, sz, fp); fclose(fp); }
++	};
++	dump("ram", &mem_b[0], RAM_SIZE);
++	dump("vram", &vram[0], VRAM_SIZE);
++	dump("aram", &aica::aica_ram[0], ARAM_SIZE);
++	dump("aregs", &aica::aica_reg[0], 0x8000);
++	gui_takeScreenshot();   // hotd2-web: also save what Flycast rendered
++	NOTICE_LOG(COMMON, "hotd2-web: dumped frame %llu", (unsigned long long)frame);
++}
++
+ void Emulator::vblank()
+ {
++	hotd2DumpHook();
+ 	EventManager::event(Event::VBlank);
+ 	runner.execTasks();
+ 	// Time out if a frame hasn't been rendered for 50 ms
 diff --git a/core/hw/sh4/sh4_core_regs.cpp b/core/hw/sh4/sh4_core_regs.cpp
 index 88c1405..ebe654b 100644
 --- a/core/hw/sh4/sh4_core_regs.cpp
@@ -137,6 +197,3 @@ index 6a25059..0140363 100644
  
  #ifdef _WIN32
  #ifndef TARGET_UWP
--- 
-2.53.0
-

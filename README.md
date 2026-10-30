@@ -53,7 +53,7 @@ See `docs/FINDINGS.md` for everything learned about the hardware and the game.
 | `runtime/seed-play.sh` | scripted play sessions that collect code the static analysis missed |
 | `web/play/` | browser front end: zip loader, WebGL2 renderer, audio worklet, input |
 | `web/serve.py` | dev server with the COOP/COEP headers threads need |
-| `patches/flycast/` | patches for the reference emulator (RAM/VRAM/sound dumps, PCM dump, Emscripten build) |
+| `patches/flycast/` | one diff for the reference emulator (RAM/VRAM/sound dumps, screenshots, PCM dump, Emscripten build) |
 | `data/seeds.txt` | entry points found at run time |
 | `docs/FINDINGS.md` | the findings log |
 
@@ -87,7 +87,8 @@ the console reports buffer health).
 
 ## Reference emulator
 
-Flycast at `patches/flycast/BASE_COMMIT` with the patches applied, built natively in
+Flycast at `patches/flycast/BASE_COMMIT` with `patches/flycast/hotd2-reference.diff` applied
+(`git apply`), built natively in
 WSL, is used only as a reference: RAM, VRAM, sound RAM and AICA register dumps at
 chosen frames (`HOTD2_DUMP_DIR`, `HOTD2_DUMP_FRAMES`) and a raw PCM dump of its
 audio (`HOTD2_PCM`).
