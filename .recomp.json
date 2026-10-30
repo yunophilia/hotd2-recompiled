@@ -1,0 +1,13 @@
+{
+  "$schema": "https://recomp.fyi/schema/v1.json",
+  "game": "The House of the Dead 2",
+  "project": "hotd2-recompiled",
+  "wikidata": "Q2584289",
+  "system": "NAOMI",
+  "type": "recomp",
+  "status": "in-progress",
+  "targets": ["Web"],
+  "toolchain": ["custom SH-4 to C recompiler", "Emscripten"],
+  "original": {"sha1": "9e77980d1aa980c879886e53cc76a16d7a9d43a1"},
+  "notes": "Static recompilation of the SH-4 program to C and WebAssembly with high-level emulation of the NAOMI hardware; plays in the browser at 60 fps with WebGL2 graphics and the game's own sound driver. Bring your own ROM set; the sha1 is the program ROM, epr-21585.ic22."
+}

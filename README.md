@@ -92,3 +92,15 @@ Flycast at `patches/flycast/BASE_COMMIT` with `patches/flycast/hotd2-reference.d
 WSL, is used only as a reference: RAM, VRAM, sound RAM and AICA register dumps at
 chosen frames (`HOTD2_DUMP_DIR`, `HOTD2_DUMP_FRAMES`) and a raw PCM dump of its
 audio (`HOTD2_PCM`).
+
+## License
+
+hotd2-recompiled is licensed under the GNU General Public License, version 2 only
+(GPL-2.0-only); see [LICENSE](LICENSE).
+
+[Flycast](https://github.com/flyinghead/flycast) (GPL-2.0) is the reference emulator
+used to check the hardware emulation, and `patches/flycast/` are patches to it.
+Thanks to the Flycast team.
+
+No game code or data is included: the ROM, the generated C and the browser build
+made from them stay on your machine. You need your own copy of the game.
