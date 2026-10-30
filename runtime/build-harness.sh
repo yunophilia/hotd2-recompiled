@@ -12,7 +12,7 @@ python3 -I -c "import sys; sys.path.insert(0, '$here/tools'); sys.argv = ['recom
 [ -f "$out/ic22.bin" ] || python3 -I -c "import zipfile; open('$out/ic22.bin', 'wb').write(zipfile.ZipFile('$zip').read('epr-21585.ic22'))"
 [ -f "$out/cart.bin" ] || python3 -I "$here/tools/cart.py" "$zip" "$out/cart.bin"
 cd "$out"
-srcs=("$out"/gen/*.c "$here"/runtime/harness.c "$here"/runtime/hle.c "$here"/runtime/jvs.c
+srcs=("$out"/gen/*.c "$here"/runtime/harness.c "$here"/runtime/tas.c "$here"/runtime/hle.c "$here"/runtime/jvs.c
       "$here"/runtime/cart.c "$here"/runtime/ta.c "$here"/runtime/coro.c "$here"/runtime/pvr.c "$here"/runtime/glframe.c "$here"/runtime/interp.c "$here"/runtime/aica.c "$here"/runtime/arm7.c "$here"/runtime/diff.c)
 mkdir -p obj
 printf '%s\n' "${srcs[@]}" | xargs -P"$(nproc)" -I{} sh -c 'o=obj/$(basename {} .c).o; [ "$o" -nt {} ] || gcc -O1 -g -w ${HOTD2_CFLAGS:-} -I'"$here"'/runtime -I'"$out"'/gen -c {} -o "$o"'
