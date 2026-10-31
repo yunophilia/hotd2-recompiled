@@ -52,7 +52,8 @@ See `docs/FINDINGS.md` for everything learned about the hardware and the game.
 | `runtime/build-web.sh` | browser build (Emscripten, WSL) → `web/game/` |
 | `runtime/seed-play.sh` | scripted play sessions that collect code the static analysis missed |
 | `web/play/` | browser front end: zip loader, WebGL2 renderer, audio worklet, input |
-| `web/serve.py` | dev server with the COOP/COEP headers threads need |
+| `web/serve.py` | dev server with the COOP/COEP headers threads need (`--public` for tunnels) |
+| `docs/SELF_HOSTING.md` | playing from anywhere through a Cloudflare Tunnel behind a login |
 | `patches/flycast/` | one diff for the reference emulator (RAM/VRAM/sound dumps, screenshots, PCM dump, Emscripten build) |
 | `data/seeds.txt` | entry points found at run time |
 | `docs/FINDINGS.md` | the findings log |

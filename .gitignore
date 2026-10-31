@@ -9,3 +9,6 @@ __pycache__/
 web/flycast/
 web/game/
 web/replay/
+# local scratch scripts and backups kept next to the code, never committed
+/hotd2-*
+*.bundle
