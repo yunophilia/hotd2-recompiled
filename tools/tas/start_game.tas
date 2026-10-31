@@ -1,0 +1,11 @@
+# Boot, insert two credits and start a 1P game (the opening cutscene is skipped).
+wait 1300f
+coin
+wait 10f
+coin
+wait 20f
+start
+wait 70f
+start
+wait 70f
+start

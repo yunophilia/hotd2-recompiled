@@ -1,0 +1,33 @@
+# The House of the Dead 2, coin-in to the ending, with real input only: auto play aims
+# using the game's own hit-test data and never writes game memory. Every checkpoint is
+# an `until` (a timeout fails the run with exit code 3) or a `check` (exit code 1), so
+# this is also a regression test of the recompiled game. See docs/tas.md.
+#
+#   tools/tas/run.sh tools/tas/full_run.tas      (about 103,400 frames; 6 minutes natively)
+#
+# chapter = u32 0C3D0530 (0-based), submode = u32 0C3D07B8 (2 playing, 8 ending,
+# 10 name entry), bosshp = f32 0C3D11FC (boss health, 0..1, for bosses that use it).
+
+include start_game.tas
+until u32 mode == 5 and u32 submode == 2 timeout 30
+log game started
+check u8 lives == 3
+include auto_setup.tas
+
+include chapter1.inc
+include chapter2.inc
+include chapter3.inc
+include chapter4.inc
+include chapter5.inc
+
+until u32 submode == 8 timeout 240
+log ending: lives {u8 lives}
+check u8 lives > 0 msg finished without continuing
+wait 8
+shot ending
+until u32 submode == 10 timeout 180
+log name entry
+shot name_entry
+auto off
+until u32 mode != 5 timeout 120
+log ranking (mode {u32 mode})
